@@ -51,12 +51,46 @@ export class ChallengeService {
   }
 
   /**
-   * CIBA needs approve/deny as alternative consumptions of ONE challenge.
-   * Peek returns the nonce without consuming; the decision handler consumes.
+   * CIBA challenges allow two alternative consumptions of one nonce: the
+   * device signs EITHER the approve payload OR the deny payload (so denials
+   * are authentic too). Stored purpose is `ciba:<authReqId>`; consumption
+   * names the decision and returns the payload the device must have signed.
    */
-  async peekNonce(challengeId: string): Promise<string | null> {
-    const raw = await this.redis.client.get(`challenge:${challengeId}`);
-    if (!raw) return null;
-    return (JSON.parse(raw) as { nonce: string }).nonce;
+  async issueCiba(
+    authReqId: string,
+    bindingId: string,
+  ): Promise<IssuedChallenge & { approvePayload: string; denyPayload: string }> {
+    const ttl = loadConfig().CHALLENGE_TTL_SECONDS;
+    const challengeId = randomBytes(16).toString('base64url');
+    const nonce = randomBytes(32).toString('base64url');
+    const record = JSON.stringify({ purpose: `ciba:${authReqId}`, nonce, bindingId });
+    await this.redis.client.set(`challenge:${challengeId}`, record, 'EX', ttl);
+    const approvePayload = buildChallengePayload({ kind: 'ciba-approve', authReqId }, challengeId, nonce);
+    const denyPayload = buildChallengePayload({ kind: 'ciba-deny', authReqId }, challengeId, nonce);
+    return {
+      challengeId,
+      nonce,
+      payload: approvePayload,
+      approvePayload,
+      denyPayload,
+      expiresAt: new Date(Date.now() + ttl * 1000).toISOString(),
+    };
+  }
+
+  async consumeCiba(
+    challengeId: string,
+    authReqId: string,
+    bindingId: string,
+    decision: 'approve' | 'deny',
+  ): Promise<string> {
+    const raw = await this.redis.client.getdel(`challenge:${challengeId}`);
+    if (!raw) throw new BridgeError('challenge_invalid', 'Unknown, expired, or already-used challenge', 400);
+    const record = JSON.parse(raw) as { purpose: string; nonce: string; bindingId: string };
+    if (record.purpose !== `ciba:${authReqId}` || record.bindingId !== bindingId) {
+      throw new BridgeError('challenge_invalid', 'Challenge purpose/binding mismatch', 400);
+    }
+    const purpose: ChallengePurpose =
+      decision === 'approve' ? { kind: 'ciba-approve', authReqId } : { kind: 'ciba-deny', authReqId };
+    return buildChallengePayload(purpose, challengeId, record.nonce);
   }
 }
