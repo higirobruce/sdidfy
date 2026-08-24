@@ -1,0 +1,29 @@
+{
+  "name": "sdid-auth-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "db:migrate": "pnpm --filter @sdid/broker db:migrate",
+    "broker:dev": "pnpm --filter @sdid/broker dev",
+    "demo:ghost-login": "pnpm --filter @sdid/e2e demo",
+    "test:e2e": "pnpm --filter @sdid/e2e test"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.7.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@swc/core",
+      "esbuild"
+    ]
+  }
+}
