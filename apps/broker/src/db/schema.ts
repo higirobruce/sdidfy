@@ -21,6 +21,8 @@ export const citizens = pgTable(
     id: uuid('id').primaryKey(),
     /** Keyed hash of NID (Q8) — the only identity reference at rest. */
     pseudoNid: text('pseudo_nid').notNull(),
+    /** SDID's opaque subject (from enrolment) — for attribute fetch + reassert; never the raw NID. */
+    sdidSubject: text('sdid_subject'),
     status: text('status').notNull().default('active'), // active|suspended|deceased-per-sdid
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

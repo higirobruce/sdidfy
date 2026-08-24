@@ -4,6 +4,7 @@ export * from './sdid.js';
 export * from './match.js';
 export * from './protocol.js';
 export * from './errors.js';
+export * from './mock-biometrics.js';
 export * from './audit.js';
 export * from './dto/enrolment.js';
 export * from './dto/device.js';
