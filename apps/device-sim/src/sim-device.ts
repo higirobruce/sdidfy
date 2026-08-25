@@ -30,7 +30,7 @@ import {
 } from '@sdid/shared';
 
 export interface SimDeviceOptions {
-  /** Broker base URL, e.g. http://localhost:3000 */
+  /** Broker base URL, e.g. http://localhost:3100 */
   brokerUrl: string;
   /** 16-digit NID of the citizen this device belongs to. */
   nid: string;

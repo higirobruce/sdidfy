@@ -39,7 +39,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const brokerUrl = process.env.BROKER_URL ?? 'http://localhost:3000';
+  const brokerUrl = process.env.BROKER_URL ?? 'http://localhost:3100';
 
   switch (command) {
     case 'login': {

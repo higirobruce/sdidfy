@@ -13,7 +13,7 @@
  *   deny <authReqId> [--report] deny a pending transaction
  *   devices                     list this citizen's device bindings
  *
- * Broker URL from --broker or env BROKER_URL (default http://localhost:3000).
+ * Broker URL from --broker or env BROKER_URL (default http://localhost:3100).
  *
  * Note: the simulated private key is non-exportable and lives only in this
  * process, so every invocation enrols a fresh binding before doing anything
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const brokerUrl = values.broker ?? process.env.BROKER_URL ?? 'http://localhost:3000';
+  const brokerUrl = values.broker ?? process.env.BROKER_URL ?? 'http://localhost:3100';
   const nid = values.nid;
   if (!nid) {
     fail('missing required --nid <16-digit NID>');
