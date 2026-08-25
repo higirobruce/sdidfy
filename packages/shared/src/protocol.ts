@@ -14,12 +14,21 @@
  *   ciba-approve:<authReqId>        — CIBA approval, bound to the auth request (T4)
  *   ciba-deny:<authReqId>           — explicit denial (also signed, so denials are authentic)
  * Challenges are single-use, short-TTL, stored server-side in Redis (T4).
+ *
+ * One purpose — `attestation` — is NOT a signing payload: the nonce is carried
+ * *inside* the platform attestation token (Play Integrity / App Attest both
+ * bind a caller-supplied nonce under their own signature), so the device never
+ * signs a `sdid-bridge:` payload for it. It is modelled here anyway because it
+ * shares the single-use, short-TTL, purpose-tagged Redis record and the same
+ * anti-replay property (T4): without a server-issued nonce, an attestation
+ * token harvested from one genuine device replays from any other.
  */
 export const CHALLENGE_PROTOCOL_VERSION = 'v1';
 
 export type ChallengePurpose =
   | { kind: 'activation' }
   | { kind: 'login' }
+  | { kind: 'attestation' }
   | { kind: 'ciba-approve'; authReqId: string }
   | { kind: 'ciba-deny'; authReqId: string };
 
@@ -29,6 +38,8 @@ export function purposeString(p: ChallengePurpose): string {
       return 'activation';
     case 'login':
       return 'login';
+    case 'attestation':
+      return 'attestation';
     case 'ciba-approve':
       return `ciba-approve:${p.authReqId}`;
     case 'ciba-deny':

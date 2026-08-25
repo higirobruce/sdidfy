@@ -29,6 +29,10 @@ import {
   pairwiseSubjects,
   relyingParties,
 } from '../../db/schema.js';
+import {
+  ATTESTATION_VERIFIERS,
+  type AttestationVerifierSource,
+} from '../../trust/attestation-verifiers.provider.js';
 import { EnrolmentModule } from './enrolment.module.js';
 import { DevicesModule } from '../devices/devices.module.js';
 import { ConsentModule } from '../consent/consent.module.js';
@@ -133,17 +137,34 @@ export class SimDevice {
     return Buffer.from(sig).toString('base64url');
   }
 
-  attestation(): { platform: 'sim'; token: string; keyAttestation: string } {
+  /**
+   * Mock attestation payload. `opts.nonce` is embedded in the token (as a real
+   * platform token binds the server nonce under its own signature) and
+   * `opts.nonceId` rides alongside; `opts.platform` lets strict-mode tests
+   * present themselves as a real platform instead of 'sim'.
+   */
+  attestation(opts?: AttestationOpts): {
+    platform: 'sim' | 'android' | 'ios';
+    token: string;
+    keyAttestation?: string;
+    nonceId?: string;
+  } {
     const token = Buffer.from(
       JSON.stringify({
         mock: true,
         deviceIntegrity: true,
         appIntegrity: true,
         hardwareBackedKey: true,
+        ...(opts?.nonce !== undefined ? { nonce: opts.nonce } : {}),
       }),
       'utf8',
     ).toString('base64url');
-    return { platform: 'sim', token, keyAttestation: 'x' };
+    return {
+      platform: opts?.platform ?? 'sim',
+      token,
+      keyAttestation: 'x',
+      ...(opts?.nonceId !== undefined ? { nonceId: opts.nonceId } : {}),
+    };
   }
 
   /** Sample "captured" for a NID. `sampleFromNid` ≠ nid simulates an impostor. */
@@ -156,15 +177,26 @@ export class SimDevice {
     };
   }
 
-  enrolStartBody(nid: string, deviceLabel: string, sampleOpts?: Parameters<SimDevice['sample']>[1]) {
+  enrolStartBody(
+    nid: string,
+    deviceLabel: string,
+    sampleOpts?: Parameters<SimDevice['sample']>[1],
+    attestationOpts?: AttestationOpts,
+  ) {
     return {
       nid,
       devicePublicKeyJwk: this.publicKeyJwk,
-      attestation: this.attestation(),
+      attestation: this.attestation(attestationOpts),
       deviceLabel,
       sample: this.sample(nid, sampleOpts),
     };
   }
+}
+
+export interface AttestationOpts {
+  nonceId?: string;
+  nonce?: string;
+  platform?: 'sim' | 'android' | 'ios';
 }
 
 export interface TestContext {
@@ -174,8 +206,14 @@ export interface TestContext {
   http: () => ReturnType<typeof request>;
 }
 
-export async function createTestApp(): Promise<TestContext> {
-  const moduleRef = await Test.createTestingModule({
+export async function createTestApp(overrides?: {
+  /**
+   * Replace the platform verifier set at the module seam (never by patching
+   * @sdid/attestation internals) so strict-mode tests can drive any verdict.
+   */
+  attestationVerifiers?: AttestationVerifierSource;
+}): Promise<TestContext> {
+  const builder = Test.createTestingModule({
     imports: [
       DbModule,
       RedisModule,
@@ -188,10 +226,11 @@ export async function createTestApp(): Promise<TestContext> {
       DevicesModule,
       ConsentModule,
     ],
-  })
-    .overrideProvider(SDID_PROVIDER)
-    .useValue(new FakeSdidProvider())
-    .compile();
+  }).overrideProvider(SDID_PROVIDER).useValue(new FakeSdidProvider());
+  if (overrides?.attestationVerifiers) {
+    builder.overrideProvider(ATTESTATION_VERIFIERS).useValue(overrides.attestationVerifiers);
+  }
+  const moduleRef = await builder.compile();
 
   const app = moduleRef.createNestApplication();
   app.useGlobalFilters(new BridgeErrorFilter());
@@ -231,7 +270,7 @@ export async function cleanTestData(ctx: TestContext, extraNids: string[] = []):
   // Reset this suite's rate-limit / lockout counters so reruns stay green
   // (fixed windows outlive a test run). Prefixes are enrolment-specific.
   const client = ctx.redis.client;
-  for (const pattern of ['rl:enrol:*', 'lockout:enrol:*']) {
+  for (const pattern of ['rl:enrol:*', 'lockout:enrol:*', 'attnonce:*']) {
     let cursor = '0';
     do {
       const [next, keys] = await client.scan(cursor, 'MATCH', pattern, 'COUNT', 500);
@@ -261,6 +300,14 @@ export async function insertTestRp(ctx: TestContext, name = 'Testkit RP'): Promi
     pairwiseSalt: randomBytes(16).toString('hex'),
   });
   return id;
+}
+
+/** Mint a single-use attestation nonce over HTTP (03 §2 step 1, T4). */
+export async function mintAttestationNonce(
+  ctx: TestContext,
+): Promise<{ nonceId: string; nonce: string; expiresAt: string }> {
+  const res = await ctx.http().post('/v1/enrol/attestation-challenge').expect(200);
+  return res.body as { nonceId: string; nonce: string; expiresAt: string };
 }
 
 /** Full enrol→activate; returns the ACTIVE bindingId. */

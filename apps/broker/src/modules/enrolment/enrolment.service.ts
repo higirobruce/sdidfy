@@ -9,6 +9,7 @@ import {
   type EnrolActivateResponse,
   type EnrolStartRequest,
   type EnrolStartResponse,
+  type AttestationChallengeResponse,
   type MatchEngine,
   type MatchResult,
   type ReferenceBiometricResult,
@@ -17,7 +18,11 @@ import {
 import { DbService } from '../../db/db.module.js';
 import { citizens, deviceBindings } from '../../db/schema.js';
 import { AuditService } from '../../audit/audit.service.js';
-import { AttestationService, type AttestationVerdict } from '../../trust/attestation.service.js';
+import {
+  AttestationRejectionError,
+  AttestationService,
+  type AttestationVerdict,
+} from '../../trust/attestation.service.js';
 import { ChallengeService } from '../../trust/challenge.service.js';
 import { PairwiseService } from '../../trust/pairwise.service.js';
 import { RateLimitService } from '../../trust/rate-limit.service.js';
@@ -30,6 +35,14 @@ export const MAX_ACTIVE_BINDINGS = 5;
 /** Enrolment failure lockout: 5 failures / 15 min window (03 §7). */
 const ENROL_MAX_FAILURES = 5;
 const ENROL_FAILURE_WINDOW_SECONDS = 900;
+
+/**
+ * Attestation-nonce mints per IP per hour. Deliberately above the 20/h
+ * enrolment ceiling (a genuine app may mint and then abandon — user cancels,
+ * attestation fails locally, network drops) but bounded: an unauthenticated
+ * mint is free work for the broker.
+ */
+const ATTESTATION_NONCE_IP_LIMIT = 60;
 
 /**
  * Detect adapter errors defensively by error name (duck-typed), so this module
@@ -74,6 +87,26 @@ export class EnrolmentService {
     @Inject(MATCH_ENGINE) private readonly matchEngine: MatchEngine,
   ) {}
 
+  /**
+   * Mint a single-use attestation nonce (03 §2 step 1, T4). Unauthenticated by
+   * necessity — it precedes every enrolment — which makes it a free-work
+   * endpoint (Redis write + audit row per call), so it is rate-limited per IP
+   * exactly like `/v1/enrol/start`. No identity exists yet, so nothing here is
+   * bound to a citizen and the audit row carries no subject.
+   */
+  async attestationChallenge(ip: string): Promise<AttestationChallengeResponse> {
+    await this.rateLimit.hit(`enrol:attest:ip:${ip}`, ATTESTATION_NONCE_IP_LIMIT, 3600);
+    const nonce = await this.challenges.issueAttestationNonce();
+    await this.audit.append({
+      actor: { type: 'citizen' },
+      action: 'auth.challenge_issued',
+      result: 'success',
+      // The nonce VALUE is never audited — only that one was minted.
+      context: { purpose: 'attestation', nonceId: nonce.nonceId },
+    });
+    return nonce;
+  }
+
   async start(req: EnrolStartRequest, ip: string): Promise<EnrolStartResponse> {
     const pseudoNid = this.pairwise.pseudoNid(req.nid);
 
@@ -84,10 +117,13 @@ export class EnrolmentService {
     await this.rateLimit.assertNotLockedOut(`enrol:nid:${pseudoNid}`, ENROL_MAX_FAILURES);
 
     // Attestation gate (03 §2 step 1) — failures are audited with the pseudo
-    // ref (no citizen row exists yet) and rethrown as-is.
+    // ref (no citizen row exists yet) and rethrown as-is. The device public
+    // key goes in because the verdict is only meaningful if the hardware key
+    // attestation covers THE KEY WE ARE ABOUT TO BIND: without that check an
+    // attacker attests a real hardware key and enrols a software-held one.
     let verdict: AttestationVerdict;
     try {
-      verdict = await this.attestation.verify(req.attestation);
+      verdict = await this.attestation.verify(req.attestation, req.devicePublicKeyJwk);
     } catch (err) {
       await this.audit.append({
         actor: { type: 'citizen' },
@@ -97,7 +133,11 @@ export class EnrolmentService {
         context: {
           reason: 'attestation_rejected',
           platform: req.attestation.platform,
-          detail: err instanceof BridgeError ? err.message : 'attestation error',
+          // The client saw one uniform message (03 §7); the trail gets the
+          // precise verifier code and detail, which is where they belong.
+          ...(err instanceof AttestationRejectionError
+            ? { code: err.rejectionCode, detail: err.rejectionDetail }
+            : { detail: err instanceof BridgeError ? err.message : 'attestation error' }),
         },
       });
       throw err;
@@ -212,6 +252,9 @@ export class EnrolmentService {
         hardwareBacked: verdict.hardwareBacked,
         assuranceCap: verdict.assuranceCap,
         detail: verdict.detail,
+        // Verifier evidence (verdict strings, key security level, app
+        // version) — never the raw token or any certificate (07 §1/§3).
+        ...(verdict.evidence !== undefined ? { evidence: verdict.evidence } : {}),
       },
       assuranceLevel,
       status: 'pending',

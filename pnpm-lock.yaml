@@ -26,6 +26,9 @@ importers:
       '@nestjs/platform-express':
         specifier: ^11.0.0
         version: 11.2.1(@nestjs/common@11.2.1(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.2.1)
+      '@sdid/attestation':
+        specifier: workspace:*
+        version: link:../../packages/attestation
       '@sdid/match-engine':
         specifier: workspace:*
         version: link:../../packages/match-engine

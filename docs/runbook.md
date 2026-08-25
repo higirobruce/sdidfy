@@ -25,7 +25,13 @@ Push in this build is wake-only **and log-only**: `PushService.wake` writes a lo
 | `SDID_STRATEGY` | `mock` | `mock` \| `oidc` \| `proprietary` — adapter strategy flag (§7) |
 | `NID_PEPPER` | `dev-only-nid-pepper-change-me` | HMAC key for the pseudonymised NID (Q8). Changing it orphans every existing citizen row — treat as immutable once citizens exist. Prod: KMS-held |
 | `KEYSTORE_DIR` | `./data/keys` | Reserved. The dev key store is actually the `signing_keys` Postgres table (§4); this knob is currently unused |
-| `ATTESTATION_MODE` | `mock` | `mock` accepts the simulator's structured attestation tokens; `strict` is the Phase 3 seam for Play Integrity / App Attest and currently rejects all enrolment with HTTP 501 |
+| `ATTESTATION_MODE` | `mock` | `mock` accepts the simulator's structured attestation tokens; `strict` runs the real Play Integrity / App Attest verifiers from `@sdid/attestation` (§10) |
+| `ATTESTATION_NONCE_TTL_SECONDS` | `300` | Lifetime of a server-issued attestation nonce (§10). Enforced `<=` the verifiers' max token age (300 s) — the broker refuses to boot in strict mode if it is larger |
+| `ANDROID_PACKAGE_NAME` | *(empty)* | Our Android package name. Strict mode only; empty is a configuration error, not "accept any" |
+| `ANDROID_CERT_SHA256_DIGESTS` | *(empty)* | Comma-separated base64 SHA-256 digests of accepted app-signing certificates |
+| `PLAY_INTEGRITY_CREDENTIALS_JSON` | *(empty)* | Service-account credentials (path or inline JSON) for the Play Integrity decode call. **The decoder is an unimplemented seam** (§10) |
+| `IOS_APP_ID` | *(empty)* | Apple App ID `<teamId>.<bundleId>`; production boot validates the shape, not just presence |
+| `IOS_ATTESTATION_PRODUCTION` | `false` | `false` accepts Apple's development aaguid. Production must be `true` |
 | `ADMIN_API_TOKEN` | `dev-admin-token` | Bearer token for `/admin/*` (RP onboarding, audit verify). Prod: never the default (§8) |
 | `ID_TOKEN_TTL_SECONDS` | `300` | ID token lifetime |
 | `ACCESS_TOKEN_TTL_SECONDS` | `600` | Access token lifetime (also the `expires_in` in token responses) |
@@ -112,6 +118,7 @@ Fixed-window counters (`RateLimitService.hit`, error `rate_limited`/429) and fai
 | Limit | Key | Policy |
 |-------|-----|--------|
 | Enrolment per NID | `rl:enrol:nid:<pseudoNid>` | 5 / hour |
+| Attestation-nonce mint per IP | `rl:enrol:attest:ip:<ip>` | 60 / hour (unauthenticated free-work endpoint) |
 | Enrolment per IP | `rl:enrol:ip:<ip>` | 20 / hour |
 | CIBA initiation per RP | `rl:ciba:rp:<rpId>` | 60 / minute |
 | Enrolment failure lockout | `lockout:enrol:nid:<pseudoNid>` | 5 failures / 15 min (covers failed match, failed PAD, unknown NID — indistinguishable by design) |
@@ -124,6 +131,7 @@ Full Redis key prefix map:
 | `rl:` | Fixed-window rate-limit counters | Window length |
 | `lockout:` | Failure counters (lockout when count ≥ max) | Window, extended exponentially at/after the threshold |
 | `challenge:` | Single-use signing challenges `{purpose, nonce, bindingId}`, consumed atomically with GETDEL | `CHALLENGE_TTL_SECONDS` (120 s) |
+| `attnonce:` | Single-use attestation nonces `{purpose, nonce}`, consumed atomically with GETDEL (§10) | `ATTESTATION_NONCE_TTL_SECONDS` (300 s) |
 | `revoked:` | Token denylist by `jti` | Until token `exp` |
 | `codeflow:` | Auth-code-flow stash `{codeChallenge, nonce, redirectUri, state}` keyed by transaction | `CIBA_REQUEST_TTL_SECONDS` (180 s) |
 
@@ -139,9 +147,18 @@ Redis loss is safe but lossy: in-flight challenges and code-flow stashes fail (u
 - `ADMIN_API_TOKEN` is not `dev-admin-token`;
 - `ATTESTATION_MODE=strict`.
 
+With `ATTESTATION_MODE=strict` (which production also requires), boot additionally refuses unless **all** of these carry real values — an empty app identifier or trust anchor makes a verdict meaningless rather than permissive:
+
+- `ANDROID_PACKAGE_NAME` non-empty;
+- `ANDROID_CERT_SHA256_DIGESTS` contains at least one digest;
+- `PLAY_INTEGRITY_CREDENTIALS_JSON` non-empty;
+- `IOS_APP_ID` shaped `<teamId>.<bundleId>`;
+- `IOS_ATTESTATION_PRODUCTION=true`;
+- `ATTESTATION_NONCE_TTL_SECONDS <= 300` (checked in every environment, not just production).
+
 Additional production notes:
 
-- `ATTESTATION_MODE=strict` currently returns HTTP 501 for all enrolments — deliberate: production enrolment is impossible until real Play Integrity / App Attest verifiers land (Phase 3). Existing bindings and RP flows are unaffected by attestation mode.
+- Strict mode is wired end-to-end but **not deployable yet** — see §10 for exactly what is missing. Existing bindings and RP flows are unaffected by attestation mode.
 - The dev key store keeps private JWKs in Postgres (`signing_keys`) — a dev-only posture; production swaps `KeysService` internals for the GoR KMS/HSM (see `docs/DECISIONS.md` f).
 - Production is additionally gated on DPIA + external pentest (spec 06 §8, 09 §5) — guard rails are necessary, not sufficient.
 
@@ -153,3 +170,52 @@ The adapter strategy is feature-flagged: `SDID_STRATEGY=mock|oidc|proprietary`, 
 - **`oidc` / `proprietary`** (today): `createSdidProvider` **throws at broker startup** — "SDID strategy pending integration answers A1/A2". Setting either flag now is a controlled way to verify the flag plumbing, not a cutover.
 
 When Phase 3 lands the real strategy (per SDID answers A1/A2), cutover is: implement `OidcEsignetStrategy` or `ProprietaryRestStrategy` behind the same `SdidProvider` contract, pass the shared contract-test suite (`packages/sdid-adapter/src/contract-tests.ts` — mock and real must pass identically), then flip `SDID_STRATEGY` and restart. No broker code changes: every strategy is automatically wrapped with the resilience layer (5 s timeout, 2 retries with jitter, circuit breaker at 5 consecutive failures / 30 s reset, zod boundary validation) and the audit hook.
+
+## 10. Attestation: nonces and strict mode (spec 03 §2 step 1, 05 §4, 06 T2/T3/T4)
+
+### The nonce round-trip
+
+Enrolment now begins one call earlier:
+
+```
+POST /v1/enrol/attestation-challenge      (unauthenticated, rate-limited per IP)
+  → { nonceId, nonce, expiresAt }
+# app feeds `nonce` to Play Integrity / App Attest, which binds it UNDER the
+# platform signature, then:
+POST /v1/enrol/start   { ..., attestation: { platform, token, keyAttestation, nonceId } }
+```
+
+- `nonce` is 32 CSPRNG bytes, base64url. `nonceId` is the opaque handle the client echoes back.
+- Stored at `attnonce:<nonceId>` for `ATTESTATION_NONCE_TTL_SECONDS` and **consumed with GETDEL** — one use, atomically, so a replay loses the race rather than being detected after the fact.
+- The nonce is consumed **before** the verifier runs, and is not returned on failure: a client whose attestation is rejected mints a fresh nonce.
+- Every mint writes an `auth.challenge_issued` audit row (`context.purpose = "attestation"`, nonce **value** never audited).
+- Never bulk-delete `attnonce:` keys; that only fails in-flight enrolments.
+
+`attestation.nonceId` is optional in the wire schema on purpose. Strict mode enforces its presence in `AttestationService`, so a missing nonce fails as a normal uniform attestation rejection instead of a shape-revealing validation error, and mock-mode clients (device-sim, e2e, the ghost-login demo) keep working untouched. Mock mode *consumes* a supplied nonce (so the simulator rehearses the production sequence) but never requires one and never fails on a stale one.
+
+### What strict mode enforces
+
+`AttestationService.verify(attestation, devicePublicKeyJwk)` in strict mode:
+
+1. rejects any platform other than `android`/`ios` (`sim` is mock-only);
+2. requires and consumes `nonceId`;
+3. calls the platform verifier with `{ token, keyAttestation, expectedNonce, devicePublicKeyJwk, now }` — the **key binding** matters as much as the nonce: without it an attacker attests a genuine hardware key and enrols a software-held one;
+4. maps the verdict onto the binding: `assuranceCap` (AL1 software-held / AL2 hardware-backed), `hardwareBacked`, and the verifier's `evidence` (verdict strings, key security level, app version) into the `device_bindings.attestation` JSONB. **No raw tokens or certificates are ever persisted.**
+
+Failure behaviour, deliberately:
+
+| Situation | Client sees | Where the truth goes |
+|-----------|-------------|----------------------|
+| Any rejection (bad nonce, replay, rooted device, wrong app, key mismatch, stale token) | `403 attestation_rejected` — *always the same body*: `"Device attestation could not be verified"` | Precise `code` + `detail` in the `enrolment.failed` audit row and the broker log (03 §7 — a precise reason tells an attacker which control to defeat) |
+| Verifier unreachable, or the verifier throws | `503 attestation_unavailable` (retryable) | `logger.error` with the verifier detail |
+
+"Could not check" is never "device failed" (that would lock out genuine citizens during a platform outage) and never an acceptance (that would be the bypass itself).
+
+### What still blocks a real strict-mode deployment
+
+Strict mode is wired, tested against stubbed verdicts, and guard-railed — but it cannot serve real citizens until:
+
+1. **Play Integrity credentials.** `apps/broker/src/trust/play-integrity.decoder.ts` is a declared, throwing seam: no GoR service account exists for the Play console project, so `decodeIntegrityToken` cannot be called. Until it is implemented, Android strict enrolment fails closed with 503. Implementing it is a one-function swap.
+2. **App identifiers.** `ANDROID_PACKAGE_NAME`, `ANDROID_CERT_SHA256_DIGESTS` and `IOS_APP_ID` need the real published app's values — they arrive with the Phase 2 React Native build, not before.
+3. **iOS trust anchors and production flag.** App Attest chains verify to Apple's App Attest root; `IOS_ATTESTATION_PRODUCTION=true` is required or a dev-provisioned build attests successfully against production.
+4. **A real client.** `device-sim` emits mock tokens; only the native app can produce tokens a real verifier accepts. Strict mode and the simulator are mutually exclusive by design (`sim` is refused in strict).

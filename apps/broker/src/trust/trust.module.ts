@@ -4,12 +4,17 @@ import { SignatureService } from './signature.service.js';
 import { PairwiseService } from './pairwise.service.js';
 import { RateLimitService } from './rate-limit.service.js';
 import { AttestationService } from './attestation.service.js';
+import {
+  ATTESTATION_VERIFIERS,
+  attestationVerifiersProvider,
+} from './attestation-verifiers.provider.js';
 import { DeviceSessionGuard } from './device-session.guard.js';
 import { ReverificationService } from './reverification.service.js';
 
 @Global()
 @Module({
   providers: [
+    attestationVerifiersProvider,
     ChallengeService,
     SignatureService,
     PairwiseService,
@@ -19,6 +24,7 @@ import { ReverificationService } from './reverification.service.js';
     ReverificationService,
   ],
   exports: [
+    ATTESTATION_VERIFIERS,
     ChallengeService,
     SignatureService,
     PairwiseService,

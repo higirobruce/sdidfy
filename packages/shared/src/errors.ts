@@ -6,7 +6,8 @@
 export const ERROR_CODES = [
   'invalid_request',
   'enrolment_failed', // generic: covers match failure, PAD failure, unknown NID (anti-probing, 03 §7)
-  'attestation_rejected',
+  'attestation_rejected', // generic: uniform for every strict-mode refusal (03 §7)
+  'attestation_unavailable', // verifier could not be reached — retryable, NOT a refusal (503)
   'binding_not_found',
   'binding_not_active',
   'challenge_invalid', // expired, unknown, or reused nonce (T4)
