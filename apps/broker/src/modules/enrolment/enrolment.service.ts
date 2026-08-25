@@ -32,15 +32,26 @@ const ENROL_MAX_FAILURES = 5;
 const ENROL_FAILURE_WINDOW_SECONDS = 900;
 
 /**
- * Adapter error classes may not exist yet in @sdid/sdid-adapter (built
- * concurrently) — detect them defensively by error name so this module never
- * depends on adapter internals beyond the SdidProvider contract.
+ * Detect adapter errors defensively by error name (duck-typed), so this module
+ * never hard-depends on adapter internals beyond the SdidProvider contract —
+ * any provider (the real adapter, a test fake, a future strategy) matches by
+ * name alone. `SdidUnavailableError` has three subtypes — timeout, circuit-open,
+ * malformed-response (02 §4) — each of which OVERRIDES `.name`, so all four
+ * names must be recognised here; matching only the base name would mis-map the
+ * common outage paths (timeout / open breaker / malformed response) to HTTP 500
+ * instead of 503. Keep this list in sync with the adapter's unavailable subtypes.
  */
+const SDID_UNAVAILABLE_ERROR_NAMES = new Set([
+  'SdidUnavailableError',
+  'SdidTimeoutError',
+  'SdidCircuitOpenError',
+  'SdidMalformedResponseError',
+]);
 function isSdidUnknownIdentityError(err: unknown): boolean {
   return err instanceof Error && err.name === 'SdidUnknownIdentityError';
 }
 function isSdidUnavailableError(err: unknown): boolean {
-  return err instanceof Error && err.name === 'SdidUnavailableError';
+  return err instanceof Error && SDID_UNAVAILABLE_ERROR_NAMES.has(err.name);
 }
 
 /**

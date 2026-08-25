@@ -6,6 +6,7 @@ import {
   createTestApp,
   enrolAndActivate,
   login,
+  SDID_UNAVAILABLE_NID,
   SimDevice,
   type TestContext,
 } from './testkit.js';
@@ -95,6 +96,19 @@ describe('enrolment + device binding (spec 03, integration)', () => {
     // Indistinguishable: identical status and identical body.
     expect(unknownRes.body).toEqual(impostorRes.body);
     expect(unknownRes.body.error).toBe('enrolment_failed');
+  });
+
+  it('SDID unavailable subtype (timeout) → 503 sdid_unavailable, not 500 (02 §4)', async () => {
+    // A timeout / open-breaker / malformed-response error is a SUBTYPE of
+    // SdidUnavailableError with its own `.name`; the broker must still map it
+    // to 503 sdid_unavailable so clients can key retry/backoff on it, rather
+    // than a generic 500 internal_error.
+    const device = await SimDevice.create();
+    const res = await ctx.http()
+      .post('/v1/enrol/start')
+      .send(device.enrolStartBody(SDID_UNAVAILABLE_NID, 'Timeout phone'))
+      .expect(503);
+    expect(res.body.error).toBe('sdid_unavailable');
   });
 
   it('PAD failure (liveness score 0.3) → enrolment_failed', async () => {

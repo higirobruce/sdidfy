@@ -34,10 +34,11 @@ import { DevicesModule } from '../devices/devices.module.js';
 import { ConsentModule } from '../consent/consent.module.js';
 
 /**
- * Integration-test support (real Postgres + Redis). The SDID adapter package
- * is still a throwing placeholder at the time of writing, so SDID_PROVIDER is
- * overridden with a local fake honoring the SdidProvider contract; the real
- * MockMatchEngine from @sdid/match-engine is used as-is.
+ * Integration-test support (real Postgres + Redis). SDID_PROVIDER is overridden
+ * with a local fake honoring the SdidProvider contract: it lets tests drive
+ * deterministic SDID outcomes by reserved NID (unknown identity, unavailable
+ * subtype) without depending on adapter internals. The real MockMatchEngine
+ * from @sdid/match-engine is used as-is.
  */
 
 export const TESTKIT_RP_CLIENT_PREFIX = 'testkit-rp-';
@@ -48,12 +49,27 @@ export function pseudoNidOf(nid: string): string {
   return createHmac('sha256', pepper).update(nid).digest('hex');
 }
 
+/**
+ * Reserved NID that makes the fake SDID surface an "unavailable" SUBTYPE error
+ * (a timeout), exactly as the resilience wrapper would in production. Used to
+ * prove the broker maps every SdidUnavailable subtype — not just the base
+ * class — to HTTP 503 (02 §4). Not in MOCK_TEST_NIDS, so it never matches.
+ */
+export const SDID_UNAVAILABLE_NID = '2000000000000000';
+
 /** Local fake for the SdidProvider contract (mock strategy semantics, 02 §2). */
 export class FakeSdidProvider implements SdidProvider {
   async getReferenceBiometric(input: {
     nid: string;
     modality: BiometricModality;
   }): Promise<ReferenceBiometricResult> {
+    if (input.nid === SDID_UNAVAILABLE_NID) {
+      // Subtype of SdidUnavailableError — overrides `.name`, like the real
+      // timeout/circuit-open/malformed errors the adapter throws.
+      const err = new Error('SDID call timed out after 2000ms');
+      err.name = 'SdidTimeoutError';
+      throw err;
+    }
     if (!(MOCK_TEST_NIDS as readonly string[]).includes(input.nid)) {
       const err = new Error('SDID does not know this identity');
       err.name = 'SdidUnknownIdentityError';
