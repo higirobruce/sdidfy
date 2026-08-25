@@ -22,6 +22,7 @@ export const MATCH_ENGINE = Symbol('MATCH_ENGINE');
       useFactory: (audit: AuditService): SdidProvider =>
         createSdidProvider({
           strategy: loadConfig().SDID_STRATEGY,
+          nidPepper: loadConfig().NID_PEPPER,
           onAudit: async (e) => {
             await audit.append({
               actor: { type: 'system' },

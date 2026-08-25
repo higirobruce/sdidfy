@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { MOCK_TEST_NIDS } from '@sdid/shared';
 import {
@@ -13,13 +13,14 @@ import { runSdidProviderContractTests } from './contract-tests.js';
 
 const KNOWN = MOCK_TEST_NIDS[1];
 const UNKNOWN = '1190000000000000';
+const DEFAULT_PEPPER = 'dev-only-nid-pepper-change-me';
 
 const expectedSubjectRef = (id: string): string =>
-  `sdid-${createHash('sha256').update(id).digest('hex').slice(0, 16)}`;
+  `sdid-${createHmac('sha256', DEFAULT_PEPPER).update(id).digest('hex').slice(0, 16)}`;
 
 // Contract suite (spec 09 §3) against the bare mock strategy...
 runSdidProviderContractTests('MockSdidStrategy (bare)', () => ({
-  provider: new MockSdidStrategy(),
+  provider: new MockSdidStrategy({ nidPepper: DEFAULT_PEPPER }),
   knownNid: MOCK_TEST_NIDS[0],
   unknownNid: UNKNOWN,
 }));

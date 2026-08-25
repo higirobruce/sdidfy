@@ -30,6 +30,8 @@ export interface CreateSdidProviderOptions {
   strategy: SdidStrategyName;
   /** Broker audit sink; invoked once per adapter call, success or failure. */
   onAudit?: (event: SdidAuditHookEvent) => Promise<void>;
+  /** NID pepper for keyed pseudonymisation (Q8, 10) — never a raw NID in audit/DB. */
+  nidPepper?: string;
   /** Mock-strategy knobs (latency/failure injection). Ignored for real strategies. */
   mock?: MockSdidStrategyOptions;
   /** Timeout/retry/circuit-breaker overrides; defaults per 02 §4. */
@@ -41,11 +43,12 @@ export interface CreateSdidProviderOptions {
  * resilience-wrapped, boundary-validated, audit-instrumented SdidProvider.
  */
 export function createSdidProvider(opts: CreateSdidProviderOptions): SdidProvider {
+  const pepper = opts.nidPepper ?? 'dev-only-nid-pepper-change-me';
   switch (opts.strategy) {
     case 'mock': {
-      const strategy = new MockSdidStrategy(opts.mock);
+      const strategy = new MockSdidStrategy({ ...(opts.mock ?? {}), nidPepper: pepper });
       const resilient = new ResilientSdidProvider(strategy, opts.resilience);
-      return withAuditHook(resilient, opts.onAudit, 'mock');
+      return withAuditHook(resilient, opts.onAudit, 'mock', pepper);
     }
     case 'oidc':
     case 'proprietary':
