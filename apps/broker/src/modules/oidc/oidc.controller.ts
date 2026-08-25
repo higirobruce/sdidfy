@@ -290,15 +290,19 @@ export class OidcController {
     if (typeof payload.jti === 'string' && (await this.redis.client.get(`revoked:${payload.jti}`))) {
       throw new BridgeError('access_denied', 'Token revoked', 401);
     }
-    const cid = payload['cid'];
     const clientId = payload['client_id'];
-    if (typeof cid !== 'string' || typeof clientId !== 'string' || typeof payload.sub !== 'string') {
+    if (typeof clientId !== 'string' || typeof payload.sub !== 'string') {
       throw new BridgeError('access_denied', 'Invalid access token', 401);
     }
-    const citizenRows = await this.dbService.db.select().from(citizens).where(eq(citizens.id, cid));
-    const citizen = citizenRows[0];
+    // Resolve the citizen from (RP, pairwise sub) — never from a global id in
+    // the token, which the RP could read to correlate citizens across RPs.
     const rp = await this.rpService.loadByClientId(clientId);
-    if (!citizen || !rp) throw new BridgeError('access_denied', 'Invalid access token', 401);
+    if (!rp) throw new BridgeError('access_denied', 'Invalid access token', 401);
+    const citizenId = await this.pairwise.citizenForSubject(rp.id, payload.sub);
+    if (!citizenId) throw new BridgeError('access_denied', 'Invalid access token', 401);
+    const citizenRows = await this.dbService.db.select().from(citizens).where(eq(citizens.id, citizenId));
+    const citizen = citizenRows[0];
+    if (!citizen) throw new BridgeError('access_denied', 'Invalid access token', 401);
 
     const scopes = String(payload['scope'] ?? '')
       .split(' ')

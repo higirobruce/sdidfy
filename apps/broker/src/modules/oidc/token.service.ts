@@ -42,10 +42,14 @@ export class TokenService {
       },
       { audience: input.rp.clientId, ttlSeconds: config.ID_TOKEN_TTL_SECONDS },
     );
+    // NOTE: the access token deliberately carries NO global citizen identifier.
+    // It is a signed JWT the RP holds and can decode, so any stable cross-RP id
+    // here (e.g. citizens.id) would let two RPs correlate the same citizen and
+    // defeat the pairwise `sub` (privacy non-negotiable, 04 §4 / 10). The broker
+    // re-resolves the citizen at /userinfo from (client_id, pairwise sub).
     const accessToken = await this.keys.signJwt(
       {
         sub,
-        cid: input.citizenId,
         scope: input.scopes.join(' '),
         acr: input.acr,
         token_use: 'access',

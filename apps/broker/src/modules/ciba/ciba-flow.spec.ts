@@ -107,6 +107,12 @@ describe('CIBA decoupled flow (04 §3)', () => {
     });
     expect(accessClaims['token_use']).toBe('access');
     expect(accessClaims['client_id']).toBe(rp.clientId);
+    // Pairwise privacy (04 §4): the access token the RP holds must carry ONLY
+    // the per-RP pairwise sub — never a global citizen identifier that two RPs
+    // could compare to correlate the same citizen.
+    expect(accessClaims.sub).toBe(loginHint);
+    expect(accessClaims['cid']).toBeUndefined();
+    expect(Object.values(accessClaims)).not.toContain(device.citizenId);
 
     // auth_req_id is single-use.
     const replayed = await tokenPoll(rp, authReqId).expect(400);
