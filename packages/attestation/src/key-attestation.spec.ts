@@ -304,6 +304,12 @@ describe('verifyAndroidKeyAttestation — malformed input', () => {
     expectRejected(outcome, 'malformed');
   });
 
+  it('rejects an oversized chain string before scanning it', () => {
+    const started = process.hrtime.bigint();
+    expectRejected(run({ chainOverride: 'A'.repeat(2_000_000) }).outcome, 'malformed');
+    expect(Number(process.hrtime.bigint() - started) / 1e6).toBeLessThan(500);
+  });
+
   it('rejects an empty or absurd chain container', () => {
     expectRejected(run({ chainOverride: '   ' }).outcome, 'malformed');
     expectRejected(run({ chainOverride: '[' }).outcome, 'malformed');

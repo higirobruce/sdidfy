@@ -124,6 +124,11 @@ export type AndroidKeyAttestationOutcome =
  * inside it is not, so each element goes through the strict decoder.
  */
 export function parseCertificateChainInput(value: string): Buffer[] {
+  if (value.length > MAX_CHAIN_LENGTH * MAX_ENCODED_CERT_CHARS) {
+    // Bound the work before splitting or scanning: the caller's string is
+    // attacker-controlled and may be arbitrarily long.
+    throw new MalformedInputError('key attestation chain is implausibly large');
+  }
   const trimmed = value.trim();
   if (trimmed.length === 0) throw new MalformedInputError('key attestation chain is empty');
 

@@ -211,6 +211,25 @@ Failure behaviour, deliberately:
 
 "Could not check" is never "device failed" (that would lock out genuine citizens during a platform outage) and never an acceptance (that would be the bypass itself).
 
+### Client contract — exact encodings the app MUST match
+
+These are byte-level contracts between the authenticator app and the verifiers.
+They are not negotiable at runtime and there is no fallback: get one wrong and
+*every* enrolment fails with a uniform `attestation_rejected`, whose audit rows
+will read `nonce_mismatch` with nothing else to go on. Verified against
+`packages/attestation/src/key-attestation.ts` and `app-attest.ts`.
+
+| What | Exact requirement |
+|------|-------------------|
+| Android attestation challenge | The **UTF-8 bytes of the `nonce` string** as returned by `/v1/enrol/attestation-challenge` — not the base64url-*decoded* 32 bytes, and not a re-encoding. Passed to `setAttestationChallenge()` at keypair generation. |
+| iOS `clientDataHash` | `SHA256(utf8(nonce))`. Apple then binds `SHA256(authData ‖ clientDataHash)` into the credCert extension `1.2.840.113635.100.8.2`; the verifier recomputes both. |
+| Android `keyAttestation` container | The X.509 chain, **leaf first**. Accepted as a JSON array of base64 DER strings, a PEM bundle, or a comma/whitespace-separated list of base64 DER. Liberal about the container, strict about the base64 inside it. |
+| iOS `token` | base64 of the CBOR App Attest object (`fmt`/`attStmt`/`authData`) exactly as `DCAppAttestService` returns it. No `keyAttestation` field — on iOS the key attestation *is* the object. |
+| Key identity | The attested key must be the **same** keypair whose public JWK is sent as `devicePublicKeyJwk`. Generating an attestation key separately from the signing key fails `key_mismatch`. |
+
+The nonce is single-use and consumed before verification, so **the app must mint
+a fresh nonce for every enrolment attempt**, including retries after a failure.
+
 ### What still blocks a real strict-mode deployment
 
 Strict mode is wired, tested against stubbed verdicts, and guard-railed — but it cannot serve real citizens until:

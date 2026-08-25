@@ -14,7 +14,6 @@
  * rather than degrading at runtime.
  */
 
-import { deriveAssuranceCap } from './assurance.js';
 import { AppAttestVerifier } from './app-attest.js';
 import { PlayIntegrityVerifier } from './play-integrity.js';
 import { GOOGLE_HARDWARE_ATTESTATION_ROOTS_PEM } from './roots.js';

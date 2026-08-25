@@ -430,6 +430,8 @@ export interface AppAttestOptions {
   credentialId?: Buffer;
   /** Append the COSE encoding of the credential public key to authData. */
   includeCoseKey?: boolean;
+  /** Encode a different key in the COSE blob than the one being certified. */
+  coseKey?: KeyObject;
   /** Override the rpIdHash (defaults to SHA256(appId)). */
   rpIdHash?: Buffer;
   /** Put a different nonce in the credCert extension. */
@@ -442,6 +444,12 @@ export interface AppAttestOptions {
   fmt?: string;
   /** Include an opaque receipt. */
   receipt?: Buffer;
+  /**
+   * Replace authData wholesale. The credCert nonce is still computed over
+   * these bytes, so the object reaches the authData parser with its nonce
+   * binding intact — the only way to test authData parsing in isolation.
+   */
+  authDataOverride?: Buffer;
 }
 
 export interface AppAttestFixture {
@@ -496,7 +504,10 @@ export function makeAppAttestObject(options: AppAttestOptions): AppAttestFixture
     credentialId,
   ];
   if (options.includeCoseKey) {
-    const jwk = options.devicePublicKey.export({ format: 'jwk' }) as { x: string; y: string };
+    const jwk = (options.coseKey ?? options.devicePublicKey).export({ format: 'jwk' }) as {
+      x: string;
+      y: string;
+    };
     authDataParts.push(
       cborMap([
         [cborUint(1), cborUint(2)], // kty: EC2
@@ -506,7 +517,7 @@ export function makeAppAttestObject(options: AppAttestOptions): AppAttestFixture
       ]),
     );
   }
-  const authData = Buffer.concat(authDataParts);
+  const authData = options.authDataOverride ?? Buffer.concat(authDataParts);
 
   const clientDataHash = sha256(Buffer.from(options.nonce, 'utf8'));
   const certifiedNonce = options.nonceOverride ?? sha256(authData, clientDataHash);
