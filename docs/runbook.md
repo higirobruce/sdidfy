@@ -34,6 +34,7 @@ Push in this build is wake-only **and log-only**: `PushService.wake` writes a lo
 | `CIBA_REQUEST_TTL_SECONDS` | `180` | Default CIBA auth-request lifetime (RPs may request up to 600); also the code-flow transaction/stash TTL |
 | `CIBA_POLL_INTERVAL_SECONDS` | `2` | `interval` returned from `/oidc/bc-authorize` |
 | `AUTH_CODE_TTL_SECONDS` | `60` | Authorization-code lifetime (single-use) |
+| `REVERIFY_INTERVAL_SECONDS` | `7776000` (90 d) | SDID re-verification cadence (§6.1). A binding older than this since its last SDID contact is re-asserted at its next auth; also the trigger the proactive sweep uses |
 
 Mock-adapter test knobs (read by `MockSdidStrategy`, dev only): `SDID_MOCK_LATENCY_MS` (simulated per-call latency), `SDID_MOCK_FAILURE_RATE` (0..1 probability of an injected `SdidUnavailableError`) — used for resilience/circuit-breaker testing.
 
@@ -79,12 +80,30 @@ This re-walks the entire hash chain: each row's `prev_hash` must equal the previ
 
 | Path | How | Propagation |
 |------|-----|-------------|
-| **Device binding** | Citizen: `POST /v1/device/bindings/revoke` (own bindings only); system: AL3 re-assertion failure revokes all of a citizen's bindings | **Immediate.** `DeviceSessionGuard` re-checks the binding's live status in Postgres on **every** backchannel request, and login/approval paths re-check `status='active'` — a revoked device is rejected on its next request even with an unexpired session JWT |
+| **Device binding** | Citizen: `POST /v1/device/bindings/revoke` (own bindings only); system: an SDID re-assertion failure (AL3 step-up or the §6.1 cadence) revokes all of a citizen's bindings | **Immediate.** `DeviceSessionGuard` re-checks the binding's live status in Postgres on **every** backchannel request, and login/approval paths re-check `status='active'` — a revoked device is rejected on its next request even with an unexpired session JWT |
 | **RP client** | `POST /admin/rps/{rpId}/suspend` | **Immediate** at the broker: client authentication and `/oidc/authorize` both reject non-active RPs on the next call. Tokens the RP already holds remain valid until expiry (≤ 600 s) unless individually revoked |
 | **Token** | `POST /oidc/revoke` (RP, own-audience tokens only) → Redis denylist `revoked:<jti>` with TTL until the token's `exp` | **Immediate** on broker-checked paths (`/oidc/userinfo`, `/oidc/introspect`). **Not visible** to an RP validating JWT signatures offline — that residual window is bounded by the token TTL (access 600 s / ID 300 s). RPs needing hard revocation must introspect |
 | **Consent** | Citizen: `POST /v1/device/consents/revoke` | **Immediate** for attribute release: `/oidc/userinfo` re-checks for a live covering grant on every call, even for a live token |
 
 The overall design conclusion for decision #11: broker-mediated checks propagate in one request round-trip; the only eventual windows are the short token TTLs themselves.
+
+### 6.1 Re-verification cadence (spec 03 §6, decision #9)
+
+Routine auth only proves a device signature — it does **not** call SDID. SDID does not push us identity changes (Q12), so periodically re-asserting the identity is our **only** signal for a revoked, deceased, or otherwise invalidated citizen behind an already-bound device. Two triggers drive it, both through `ReverificationService`:
+
+- **Lazy, at next use.** Every direct login and every CIBA **approval** (any assurance level) re-asserts the identity if the binding is past `REVERIFY_INTERVAL_SECONDS` since its last SDID contact (a prior reassert, else enrolment/activation). An AL3 request additionally forces a re-assertion every time (step-up). A CIBA **denial** never calls SDID.
+- **Proactive, on a schedule.** `POST /admin/reverify/sweep` re-asserts every active binding that is past the cadence — one SDID call per citizen — so a device that is never used again is still caught. Drive it from an external scheduler (cron / Kubernetes CronJob), e.g. hourly:
+
+  ```bash
+  curl -s -X POST http://localhost:3100/admin/reverify/sweep \
+    -H "Authorization: Bearer $ADMIN_API_TOKEN" \
+    -H 'Content-Type: application/json' -d '{"limit": 500}'
+  # → {"scanned": 4210, "due": 37, "reasserted": 36, "revoked": 1}
+  ```
+
+  `limit` caps citizens re-asserted per call (default 200, max 1000) — size it to your SDID verification quota (A5). Re-run until `due` reaches 0 to drain a backlog.
+
+**When SDID declares an identity invalid** (either trigger): the citizen is set `status='suspended'`, **all** their active bindings are revoked (`revoke_reason='sdid-reassert-invalid'`), and the event is audited (`sdid.reassert`, `result='failure'`). The lazy path fails that auth with HTTP 403 `access_denied`; the sweep counts it under `revoked` and continues. Recovery is a fresh enrolment with a live biometric re-match (§ spec 03 §5) — there is no un-suspend path by design.
 
 ## 7. Rate limits, lockouts, and Redis keys
 

@@ -5,6 +5,7 @@ import { PairwiseService } from './pairwise.service.js';
 import { RateLimitService } from './rate-limit.service.js';
 import { AttestationService } from './attestation.service.js';
 import { DeviceSessionGuard } from './device-session.guard.js';
+import { ReverificationService } from './reverification.service.js';
 
 @Global()
 @Module({
@@ -15,6 +16,7 @@ import { DeviceSessionGuard } from './device-session.guard.js';
     RateLimitService,
     AttestationService,
     DeviceSessionGuard,
+    ReverificationService,
   ],
   exports: [
     ChallengeService,
@@ -23,6 +25,7 @@ import { DeviceSessionGuard } from './device-session.guard.js';
     RateLimitService,
     AttestationService,
     DeviceSessionGuard,
+    ReverificationService,
   ],
 })
 export class TrustModule {}

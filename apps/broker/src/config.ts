@@ -19,6 +19,12 @@ const configSchema = z.object({
   CIBA_REQUEST_TTL_SECONDS: z.coerce.number().default(180),
   CIBA_POLL_INTERVAL_SECONDS: z.coerce.number().default(2),
   AUTH_CODE_TTL_SECONDS: z.coerce.number().default(60),
+  // Re-verification cadence (03 §6, decision #9): routine auth verifies a
+  // signature only, so periodic SDID re-assertion is our ONLY signal for a
+  // revoked/deceased/changed identity. A binding older than this since its
+  // last SDID contact (enrolment or a prior reassert) is re-verified at its
+  // next use, on top of the always-on AL3 step-up. Default ~90 days.
+  REVERIFY_INTERVAL_SECONDS: z.coerce.number().default(90 * 24 * 60 * 60),
 });
 
 export type BrokerConfig = z.infer<typeof configSchema>;

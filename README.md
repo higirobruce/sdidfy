@@ -77,6 +77,7 @@ Everything downstream of enrolment is "verify a signature" — which is exactly 
 | CIBA backchannel + poll delivery, pairwise subjects, consent (spec 04 §3–§5) | Implemented (Phase 1) |
 | Auth code + PKCE flow (phone-approval page, no broker browser session in v1) | Implemented (Phase 1) |
 | Enrolment, device binding, activation, direct login, revocation (spec 03) | Implemented (Phase 2, device simulator in place of the RN app) |
+| Re-verification cadence: ~90d staleness + AL3 step-up, proactive admin sweep (spec 03 §6, decision #9) | Implemented (Phase 1 defs; cadence tuning in Phase 3) |
 | RP onboarding admin API (spec 04 §6) | Implemented |
 | Real SDID strategies (`oidc` / `proprietary`) | Gated on SDID answers A1–A7 (Phase 3) |
 | Real attestation (Play Integrity / App Attest), `ATTESTATION_MODE=strict` | Gated on Phase 3 |

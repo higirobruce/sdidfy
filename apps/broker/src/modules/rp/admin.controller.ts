@@ -14,10 +14,12 @@ import { ZodPipe } from '../../common/zod.pipe.js';
 import { DbService } from '../../db/db.module.js';
 import { citizens, relyingParties } from '../../db/schema.js';
 import { PairwiseService } from '../../trust/pairwise.service.js';
+import { ReverificationService } from '../../trust/reverification.service.js';
 import { AdminGuard } from './admin.guard.js';
 import { sha256Hex } from './rp.service.js';
 
 const provisionPairwiseSchema = z.object({ pseudoNid: z.string().min(1) });
+const reverifySweepSchema = z.object({ limit: z.coerce.number().int().min(1).max(1000).optional() });
 
 /**
  * RP onboarding admin API (04 §6). Every action is admin-gated (AdminGuard)
@@ -31,6 +33,7 @@ export class AdminController {
     private readonly dbService: DbService,
     private readonly audit: AuditService,
     private readonly pairwise: PairwiseService,
+    private readonly reverification: ReverificationService,
   ) {}
 
   @Post('rps')
@@ -156,5 +159,28 @@ export class AdminController {
   @Get('audit/verify')
   async verifyAudit(): Promise<{ intact: boolean; brokenAtSeq: number | null; count: number }> {
     return this.audit.verifyChain();
+  }
+
+  /**
+   * Proactive re-verification sweep (03 §6 "on a schedule", decision #9). Meant
+   * to be driven by an external scheduler (cron / Kubernetes CronJob) so a
+   * revoked/deceased identity is caught even on a device that is never used
+   * again — rather than only lazily at its next auth. Re-asserts each active
+   * binding past the cadence against SDID, one call per citizen; an invalid
+   * identity is suspended + revoked as part of the tally, not an error.
+   */
+  @Post('reverify/sweep')
+  @HttpCode(200)
+  async reverifySweep(
+    @Body(new ZodPipe(reverifySweepSchema)) body: z.infer<typeof reverifySweepSchema>,
+  ): Promise<{ scanned: number; due: number; reasserted: number; revoked: number }> {
+    const summary = await this.reverification.sweep(body.limit);
+    await this.audit.append({
+      actor: { type: 'admin' },
+      action: 'admin.action',
+      result: 'success',
+      context: { op: 'reverify-sweep', ...summary },
+    });
+    return summary;
   }
 }

@@ -28,6 +28,7 @@ import { SDID_PROVIDER, SdidModule } from '../../sdid/sdid.module.js';
 import { DEVICE_SESSION_AUDIENCE } from '../../trust/device-session.guard.js';
 import { TrustModule } from '../../trust/trust.module.js';
 import { CibaModule } from '../ciba/ciba.module.js';
+import { DevicesModule } from '../devices/devices.module.js';
 import { RpModule } from '../rp/rp.module.js';
 import { OidcModule } from './oidc.module.js';
 
@@ -85,6 +86,7 @@ export async function createHarness(): Promise<Harness> {
       RpModule,
       OidcModule,
       CibaModule,
+      DevicesModule,
     ],
   })
     .overrideProvider(SDID_PROVIDER)
