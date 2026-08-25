@@ -16,6 +16,7 @@ import { KeysService } from '../../keys/keys.service.js';
 import { ChallengeService } from '../../trust/challenge.service.js';
 import { DEVICE_SESSION_AUDIENCE } from '../../trust/device-session.guard.js';
 import { RateLimitService } from '../../trust/rate-limit.service.js';
+import { ReverificationService } from '../../trust/reverification.service.js';
 import { SignatureService } from '../../trust/signature.service.js';
 
 /** Login failure lockout: 5 failures / 15 min window (T1, 03 §7). */
@@ -45,6 +46,7 @@ export class DevicesService {
     private readonly challenges: ChallengeService,
     private readonly rateLimit: RateLimitService,
     private readonly signatures: SignatureService,
+    private readonly reverification: ReverificationService,
   ) {}
 
   private async loadBinding(bindingId: string): Promise<BindingRow> {
@@ -113,6 +115,18 @@ export class DevicesService {
     }
 
     await this.rateLimit.clearFailures(`login:${req.bindingId}`);
+
+    // Re-verification cadence (03 §6, decision #9): a routine login only proved
+    // a signature. If this binding is past the SDID re-verify cadence, re-assert
+    // the identity now — our only signal for a revoked/deceased identity behind
+    // an already-bound device. An invalid identity throws access_denied (403)
+    // after suspending the citizen and revoking their bindings; the login fails.
+    await this.reverification.reassertIfDue({
+      citizenId: binding.citizenId,
+      binding,
+      trigger: 'direct-login',
+    });
+
     await this.dbService.db
       .update(deviceBindings)
       .set({ lastUsedAt: new Date() })

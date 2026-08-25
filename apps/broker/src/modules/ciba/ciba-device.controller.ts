@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Inject, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Req, UseGuards } from '@nestjs/common';
 import {
   BridgeError,
   alMeets,
@@ -7,17 +7,16 @@ import {
   type CibaDecisionRequest,
   type PendingTransaction,
   type PendingTransactionsResponse,
-  type SdidProvider,
 } from '@sdid/shared';
 import { and, eq, gt, inArray } from 'drizzle-orm';
 import type { Request } from 'express';
 import { AuditService } from '../../audit/audit.service.js';
 import { ZodPipe } from '../../common/zod.pipe.js';
 import { DbService } from '../../db/db.module.js';
-import { authTransactions, citizens, deviceBindings, relyingParties } from '../../db/schema.js';
-import { SDID_PROVIDER } from '../../sdid/sdid.module.js';
+import { authTransactions, deviceBindings, relyingParties } from '../../db/schema.js';
 import { ChallengeService } from '../../trust/challenge.service.js';
 import { DeviceSessionGuard, type DeviceSession } from '../../trust/device-session.guard.js';
+import { ReverificationService } from '../../trust/reverification.service.js';
 import { SignatureService } from '../../trust/signature.service.js';
 
 type DeviceRequest = Request & { deviceSession: DeviceSession };
@@ -50,7 +49,7 @@ export class CibaDeviceController {
     private readonly challenges: ChallengeService,
     private readonly signatures: SignatureService,
     private readonly audit: AuditService,
-    @Inject(SDID_PROVIDER) private readonly sdid: SdidProvider,
+    private readonly reverification: ReverificationService,
   ) {}
 
   @Get('pending')
@@ -138,10 +137,19 @@ export class CibaDeviceController {
       throw new BridgeError('assurance_insufficient', 'Binding does not meet requested assurance', 403);
     }
 
-    // AL3 step-up (03 §6, 06 §6): re-assert the identity with SDID before a
-    // high-assurance approval — this is also the revoked/deceased signal.
-    if (txn.requestedAl === 'AL3') {
-      await this.stepUpReassert(txn.citizenId, binding.id);
+    // Re-verification (03 §6, 06 §6, decision #9): before minting anything on
+    // an APPROVAL, re-assert the identity with SDID when this is an AL3 step-up
+    // (always) or the binding is past the re-verify cadence (any level). This
+    // is our only revoked/deceased-identity signal; an invalid identity
+    // suspends the citizen and revokes their bindings. A denial mints nothing,
+    // so it needs no fresh identity check.
+    if (body.decision === 'approve') {
+      await this.reverification.reassertIfDue({
+        citizenId: txn.citizenId,
+        binding,
+        force: txn.requestedAl === 'AL3',
+        trigger: txn.requestedAl === 'AL3' ? 'al3-step-up' : 'ciba-approve',
+      });
     }
 
     const payload = await this.challenges.consumeCiba(
@@ -186,52 +194,5 @@ export class CibaDeviceController {
       .where(eq(deviceBindings.id, binding.id));
 
     return { status };
-  }
-
-  /**
-   * SDID re-assertion for AL3 (06 §6 assurance degradation). An invalid
-   * identity suspends the citizen and revokes every binding — the citizen
-   * must re-enrol (03 §5).
-   */
-  private async stepUpReassert(citizenId: string, bindingId: string): Promise<void> {
-    const db = this.dbService.db;
-    const citizenRows = await db.select().from(citizens).where(eq(citizens.id, citizenId));
-    const citizen = citizenRows[0];
-    if (!citizen || !citizen.sdidSubject) {
-      throw new BridgeError('access_denied', 'Identity cannot be re-asserted', 403);
-    }
-    const result = await this.sdid.reassert(citizen.sdidSubject);
-    const now = new Date();
-    if (!result.valid) {
-      await db.update(citizens).set({ status: 'suspended', updatedAt: now }).where(eq(citizens.id, citizenId));
-      await db
-        .update(deviceBindings)
-        .set({ status: 'revoked', revokedAt: now, revokeReason: 'sdid-reassert-invalid' })
-        .where(eq(deviceBindings.citizenId, citizenId));
-      await this.audit.append({
-        actor: { type: 'system' },
-        action: 'sdid.reassert',
-        subjectRef: citizenId,
-        deviceBindingId: bindingId,
-        sdidTxnRef: result.txnRef,
-        result: 'failure',
-        context: { reason: 'identity-invalid', effect: 'citizen-suspended-bindings-revoked' },
-      });
-      throw new BridgeError('access_denied', 'Identity cannot be re-asserted', 403);
-    }
-    await db
-      .update(deviceBindings)
-      .set({ lastReassertedAt: now })
-      .where(eq(deviceBindings.id, bindingId));
-    await this.audit.append({
-      actor: { type: 'system' },
-      action: 'sdid.reassert',
-      subjectRef: citizenId,
-      deviceBindingId: bindingId,
-      assurance: result.assurance,
-      sdidTxnRef: result.txnRef,
-      result: 'success',
-      context: { trigger: 'al3-step-up' },
-    });
   }
 }
