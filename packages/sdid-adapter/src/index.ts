@@ -1,21 +1,54 @@
-// PLACEHOLDER — the real adapter (mock strategy, resilience wrapper, factory,
-// audit hooks, contract tests) is implemented per spec 02. This stub keeps the
-// workspace graph compiling; see src/ modules once implemented.
-import type { AuditAction, SdidProvider, SdidStrategyName } from '@sdid/shared';
+import type { SdidProvider, SdidStrategyName } from '@sdid/shared';
+import { MockSdidStrategy, type MockSdidStrategyOptions } from './mock-strategy.js';
+import { ResilientSdidProvider, type ResilienceOptions } from './resilience.js';
+import { withAuditHook, type SdidAuditHookEvent } from './audit-hook.js';
 
-export interface SdidAuditHookEvent {
-  action: AuditAction;
-  subjectRef?: string;
-  txnRef?: string;
-  result: 'success' | 'failure';
-  context?: Record<string, unknown>;
-}
+export {
+  SdidUnknownIdentityError,
+  SdidUnavailableError,
+  SdidTimeoutError,
+  SdidCircuitOpenError,
+  SdidMalformedResponseError,
+} from './errors.js';
+export { MockSdidStrategy, type MockSdidStrategyOptions } from './mock-strategy.js';
+export {
+  ResilientSdidProvider,
+  CircuitBreaker,
+  type ResilienceOptions,
+  type CircuitState,
+} from './resilience.js';
+export { withAuditHook, type SdidAuditHook, type SdidAuditHookEvent } from './audit-hook.js';
+export { sdidSubjectForNid, auditSubjectRef, isSdidSubject } from './pseudonym.js';
+// NOTE: the vitest-based contract suite (runSdidProviderContractTests) is
+// deliberately NOT re-exported here — this entry is imported by the broker at
+// runtime, and vitest's CJS entry throws when require()d outside a test run.
+// Test files import it from './contract-tests.js' directly.
+export type { SdidProviderContractContext } from './contract-tests.js';
 
 export interface CreateSdidProviderOptions {
+  /** Feature-flagged strategy (02 §4): SDID_STRATEGY=mock|oidc|proprietary. */
   strategy: SdidStrategyName;
+  /** Broker audit sink; invoked once per adapter call, success or failure. */
   onAudit?: (event: SdidAuditHookEvent) => Promise<void>;
+  /** Mock-strategy knobs (latency/failure injection). Ignored for real strategies. */
+  mock?: MockSdidStrategyOptions;
+  /** Timeout/retry/circuit-breaker overrides; defaults per 02 §4. */
+  resilience?: ResilienceOptions;
 }
 
-export function createSdidProvider(_opts: CreateSdidProviderOptions): SdidProvider {
-  throw new Error('sdid-adapter not yet implemented');
+/**
+ * Adapter entry point (spec 02). Whatever the strategy, the broker receives a
+ * resilience-wrapped, boundary-validated, audit-instrumented SdidProvider.
+ */
+export function createSdidProvider(opts: CreateSdidProviderOptions): SdidProvider {
+  switch (opts.strategy) {
+    case 'mock': {
+      const strategy = new MockSdidStrategy(opts.mock);
+      const resilient = new ResilientSdidProvider(strategy, opts.resilience);
+      return withAuditHook(resilient, opts.onAudit, 'mock');
+    }
+    case 'oidc':
+    case 'proprietary':
+      throw new Error('SDID strategy pending integration answers A1/A2 (docs/SPEC.md 02 §3)');
+  }
 }

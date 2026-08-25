@@ -13,7 +13,9 @@ export default defineConfig({
   },
   plugins: [
     swc.vite({
-      module: { type: 'commonjs' },
+      // ESM output: vitest 3 cannot load CJS-transformed test files (its CJS
+      // entry is a guard that throws). Decorator metadata is still emitted.
+      module: { type: 'es6' },
       jsc: {
         parser: { syntax: 'typescript', decorators: true },
         transform: { legacyDecorator: true, decoratorMetadata: true },
