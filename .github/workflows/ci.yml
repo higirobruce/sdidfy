@@ -52,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -119,7 +119,7 @@ jobs:
       # matching issuer itself. Setting them here would fight that.
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # pnpm first, so setup-node's pnpm cache has a pnpm to ask about the
       # store path. The version is NOT pinned here on purpose: the action
@@ -237,7 +237,7 @@ jobs:
       DATABASE_URL: postgresql://sdid:sdid_dev@localhost:5432/sdid_bridge
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
