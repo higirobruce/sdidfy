@@ -422,7 +422,15 @@ export interface AppAttestOptions {
   appId: string;
   nonce: string;
   devicePrivateKey?: KeyObject;
+  /** The App Attest key Apple certifies — NOT the enrolled signing key. */
   devicePublicKey: KeyObject;
+  /**
+   * The separate Secure Enclave signing key being enrolled, folded into
+   * clientData. On a real device this is always a different key from the App
+   * Attest key (see app-attest.ts step 8). Defaults to `devicePublicKey` so
+   * tests that do not care about the distinction stay readable.
+   */
+  enrolledPublicKey?: KeyObject;
   aaguid?: Buffer;
   signCount?: number;
   now?: number;
@@ -519,7 +527,13 @@ export function makeAppAttestObject(options: AppAttestOptions): AppAttestFixture
   }
   const authData = options.authDataOverride ?? Buffer.concat(authDataParts);
 
-  const clientDataHash = sha256(Buffer.from(options.nonce, 'utf8'));
+  // clientData = utf8(nonce) ‖ rawPoint(enrolled signing key): this is what
+  // welds BOTH the one-time nonce and the enrolled key into Apple's certified
+  // digest (app-attest.ts step 2).
+  const clientDataHash = sha256(
+    Buffer.from(options.nonce, 'utf8'),
+    rawPoint(options.enrolledPublicKey ?? options.devicePublicKey),
+  );
   const certifiedNonce = options.nonceOverride ?? sha256(authData, clientDataHash);
 
   const credCert = makeCertificate({

@@ -4,10 +4,13 @@
  * The attestation objects are assembled byte by byte: CBOR encoded by the
  * fixture encoder, authData laid out to Apple's format, and the credCert
  * signed for real with the nonce extension carrying
- * SHA256(authData ‖ SHA256(nonce)). Each rejection case removes exactly one of
+ * SHA256(authData ‖ SHA256(nonce ‖ enrolledKey)). Each rejection case removes
+ * exactly one of
  * those properties, so a passing test says the check is load-bearing rather
  * than incidental.
  */
+
+import type { KeyObject } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
@@ -41,6 +44,7 @@ async function run(
     rootPemOverride?: string;
     tokenOverride?: string;
     enrolDifferentKey?: boolean;
+    enrolledPublicKey?: KeyObject;
   } = {},
 ): Promise<AttestationResult> {
   const device = generateEcKeyPair();
@@ -65,7 +69,9 @@ async function run(
     token: options.tokenOverride ?? fixture.token,
     expectedNonce: options.expectedNonce ?? NONCE,
     devicePublicKeyJwk: toJwk(
-      options.enrolDifferentKey ? other.publicKey : options.devicePublicKey ?? device.publicKey,
+      options.enrolDifferentKey
+        ? other.publicKey
+        : options.enrolledPublicKey ?? options.devicePublicKey ?? device.publicKey,
     ),
     now: options.verifyNow ?? options.now ?? NOW,
   });
@@ -160,9 +166,24 @@ describe('AppAttestVerifier — identity and key binding', () => {
     expectRejected(result, 'key_mismatch');
   });
 
-  it('rejects an attestation over a key other than the one being enrolled', async () => {
+  it('accepts the real iOS shape: App Attest key and enrolled signing key are different keys', async () => {
+    // The case that actually ships. An App Attest key can only be used via
+    // generateAssertion() and cannot be biometry-gated, so the enrolled
+    // signing key is always a separate Secure Enclave key (05 §3, T1). The
+    // binding comes from clientData, not from the two keys being equal — an
+    // earlier version of this verifier demanded equality and would have
+    // rejected every genuine iOS enrolment.
+    const enrolled = generateEcKeyPair().publicKey;
+    const result = await run({ enrolledPublicKey: enrolled });
+    expect(result.ok, 'a separate enrolled key must verify').toBe(true);
+  });
+
+  it('rejects an attestation whose clientData bound a different enrolled key', async () => {
+    // Substituting the enrolled key changes clientDataHash and therefore the
+    // digest Apple certified, so this surfaces as nonce_mismatch rather than
+    // key_mismatch — indistinguishable by construction (app-attest.ts step 8).
     const result = await run({ enrolDifferentKey: true });
-    expectRejected(result, 'key_mismatch');
+    expectRejected(result, 'nonce_mismatch');
   });
 
   it('rejects a COSE key in authData that disagrees with the certificate', async () => {

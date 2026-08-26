@@ -117,9 +117,21 @@ export interface AttestationRequest {
    */
   expectedNonce: string;
   /**
-   * The public key about to be bound (03 §2 step 7). Hardware key attestation
-   * is checked to cover THIS key; a mismatch is `key_mismatch`, never a
-   * downgrade to AL1.
+   * The public key about to be bound (03 §2 step 7). Every platform must prove
+   * the attestation covers THIS key; a mismatch is a rejection, never a
+   * downgrade to AL1. How that proof is constructed differs by platform:
+   *
+   *   - **Android**: the key attestation certificate chain is *over* this key,
+   *     so the leaf's public key is compared directly. A mismatch is
+   *     `key_mismatch`.
+   *   - **iOS**: it cannot be a direct comparison. An App Attest key is
+   *     usable only via `generateAssertion()` and cannot be biometry-gated,
+   *     while 05 §3 / T1 require a fresh biometric unlock per signature — so
+   *     the enrolled signing key is necessarily a *different*, separate Secure
+   *     Enclave key. The binding is carried in clientData instead:
+   *     `clientData = utf8(nonce) ‖ rawPoint(devicePublicKeyJwk)`, which Apple
+   *     certifies. Substituting a different key therefore surfaces as
+   *     `nonce_mismatch`.
    */
   devicePublicKeyJwk: { kty: 'EC'; crv: 'P-256'; x: string; y: string };
   /** Injected clock (epoch ms) so freshness checks are deterministic in tests. */

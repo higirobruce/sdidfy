@@ -29,7 +29,9 @@
  *      attestation;
  *   6. aaguid must be the production `appattest` unless the deployment has
  *      explicitly opted into development builds;
- *   7. the certified key must be the key being enrolled (key binding).
+ *   7. the enrolled signing key is bound by folding it into clientData, NOT by
+ *      requiring it to equal the attested key — on iOS those are necessarily
+ *      different keys (see step 8 in the code for why).
  *
  * The receipt is NOT verified here: validating it requires an online call to
  * Apple, and these verifiers are offline by construction (types.ts). Its
@@ -152,8 +154,21 @@ export class AppAttestVerifier implements AttestationVerifier {
     if (!chainResult.ok) return reject('chain_invalid', `app attest ${chainResult.detail}`);
     const credCert = chain[0]!;
 
-    // 2. Nonce binding (T4).
-    const clientDataHash = sha256(Buffer.from(request.expectedNonce, 'utf8'));
+    // 2. Nonce AND key binding, together (T4).
+    //
+    //    clientData = utf8(nonce) ‖ rawPoint(devicePublicKeyJwk)
+    //
+    //    Apple certifies SHA256(authData ‖ clientDataHash) inside the credCert
+    //    extension, so folding the enrolled signing key into clientData welds
+    //    BOTH the one-time nonce and that specific key to this attestation.
+    //    That is what makes the key binding work on iOS at all — see step 8.
+    let expectedPoint: Buffer;
+    try {
+      expectedPoint = jwkToRawPoint(request.devicePublicKeyJwk, 'devicePublicKeyJwk');
+    } catch (error) {
+      return reject('malformed', `device public key: ${describe(error)}`);
+    }
+    const clientDataHash = sha256(Buffer.from(request.expectedNonce, 'utf8'), expectedPoint);
     const expectedNonceDigest = sha256(attestation.authData, clientDataHash);
     let certifiedNonce: Uint8Array;
     try {
@@ -204,29 +219,37 @@ export class AppAttestVerifier implements AttestationVerifier {
       return reject('app_integrity', 'development aaguid presented to a production deployment');
     }
 
-    // 8. Key binding: on iOS the attested key is the key we enrol, so this is
-    //    the same check Android does against its leaf certificate.
-    let expectedPoint: Buffer;
-    try {
-      expectedPoint = jwkToRawPoint(request.devicePublicKeyJwk, 'devicePublicKeyJwk');
-    } catch (error) {
-      return reject('malformed', `device public key: ${describe(error)}`);
-    }
-    if (!bytesEqual(credCertPoint, expectedPoint)) {
-      return reject('key_mismatch', 'app attest key is not the key being enrolled');
-    }
+    // 8. Key binding — already established in step 2, and NOT by comparing the
+    //    App Attest key to the enrolled key. Those are necessarily different
+    //    keys on iOS:
+    //
+    //      - an App Attest key is created by DCAppAttestService.generateKey()
+    //        and can only ever be used via generateAssertion(); it cannot sign
+    //        an arbitrary challenge payload, which is what every login does;
+    //      - it cannot be biometry-gated, and 05 §3 / T1 require a fresh
+    //        biometric unlock for every signature.
+    //
+    //    So the enrolled signing key is a separate Secure Enclave key, and the
+    //    binding is carried by clientData (step 2): Apple certifies
+    //    SHA256(authData ‖ SHA256(nonce ‖ enrolledKey)), which no attacker can
+    //    produce for a key they did not present at attestation time.
+    //
+    //    Consequence worth knowing when reading audit rows: substituting a
+    //    different enrolled key changes clientDataHash, so it surfaces as
+    //    `nonce_mismatch` rather than `key_mismatch`. The two are
+    //    indistinguishable here by construction.
     if (authData.credentialPublicKey) {
-      // authData may carry the COSE encoding of the same key. If present it
-      // must agree — a disagreement means the two halves of the object
-      // describe different keys.
+      // Internal consistency only: when authData carries the COSE encoding of
+      // the App Attest key it must agree with the credCert, or the two halves
+      // of the object describe different keys.
       let cosePoint: Buffer;
       try {
         cosePoint = coseKeyToRawPoint(authData.credentialPublicKey);
       } catch (error) {
         return reject('malformed', `app attest credential public key: ${describe(error)}`);
       }
-      if (!bytesEqual(cosePoint, expectedPoint)) {
-        return reject('key_mismatch', 'authData credential key differs from the key being enrolled');
+      if (!bytesEqual(cosePoint, credCertPoint)) {
+        return reject('key_mismatch', 'authData credential key differs from the credCert key');
       }
     }
 
