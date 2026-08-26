@@ -1,0 +1,179 @@
+name: Security
+
+# Dependency and static-analysis scanning (SPEC 09 §3: "SAST/dependency
+# scanning in CI; external pentest before prod").
+#
+# HONEST SCOPE. What runs here today is what can run with no new dependencies:
+#   - `pnpm audit` against the advisory database (advisory, NOT blocking yet)
+#   - the grep-based secret scan, on a schedule as well as per-PR
+# Real SAST is NOT covered. The step below names the tool that would cover it
+# and fails no build, so nobody reads a green check here as "this code has been
+# statically analysed". Enabling it is a deliberate decision with an owner
+# (Pacifique, per SPEC 09 §4), not something to leave to a CI file.
+#
+# The weekly schedule matters more than the per-PR run: a dependency that was
+# clean when merged becomes vulnerable later without anyone touching the repo.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Mondays 05:00 UTC (07:00 Kigali) — a fresh advisory list at the start of
+    # the week, before anyone starts merging.
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  dependencies:
+    name: dependency audit (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      # --ignore-scripts: nothing here needs postinstall to run, and audit
+      # should not be the reason arbitrary install scripts execute.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # ---------------------------------------------------------------------
+      # NON-BLOCKING ON PURPOSE, FOR NOW.
+      #
+      # Phases 0-2 have never had an audit gate, so the first blocking run
+      # would fail on a backlog nobody has triaged, and the reflex would be to
+      # delete the step. So: land it advisory, triage the output, then make it
+      # blocking. That flip is a two-line change:
+      #
+      #   1. delete `continue-on-error: true` below;
+      #   2. keep `--audit-level moderate` (or raise to `high` if moderate
+      #      proves too noisy — but write down why in DECISIONS.md).
+      #
+      # For an advisory that is genuinely not exploitable here, the waiver
+      # mechanism is `pnpm.auditConfig.ignoreCves` in the root package.json —
+      # each entry with a comment naming the CVE and why it does not apply.
+      # Never widen `--audit-level` to silence a single finding.
+      #
+      # SPEC 06 §8 gates production on an external assessment; this step is
+      # hygiene between now and then, not a substitute for it.
+      # ---------------------------------------------------------------------
+      - name: pnpm audit (advisory — see the comment above before making it blocking)
+        continue-on-error: true
+        run: |
+          set +e
+          pnpm audit --audit-level moderate
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "::notice::pnpm audit found no advisories at or above 'moderate'"
+          else
+            echo "::warning::pnpm audit reported advisories (exit ${rc}). Advisory today — triage them, then delete continue-on-error above."
+          fi
+          # Exits non-zero on findings. `continue-on-error: true` is the ONLY
+          # thing keeping the job green — remove it and this step blocks.
+          exit "$rc"
+
+      - name: Summarise the production dependency surface
+        run: |
+          {
+            echo "### Dependency audit"
+            echo
+            echo "Ran \`pnpm audit --audit-level moderate\` (advisory, non-blocking)."
+            echo "See the workflow log for the advisory list."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # The same grep-based scan the `guards` job in ci.yml runs, repeated on
+      # the weekly schedule so a credential committed on a branch that never
+      # opened a PR still surfaces.
+      - name: Secret scan (checkout only, fixed patterns)
+        run: bash .github/scripts/secret-scan.sh
+
+      # -----------------------------------------------------------------------
+      # PLACEHOLDER — history-aware secret detection is NOT covered.
+      #
+      # secret-scan.sh reads the checked-out tree. It cannot see a credential
+      # that was committed and then removed in a later commit, which is the
+      # case that actually matters: the value is still in the object database
+      # and still valid until it is rotated.
+      #
+      # To close it, either:
+      #   - add `gitleaks/gitleaks-action@v2` (scans history; needs a licence
+      #     key for organisations), or
+      #   - turn on GitHub secret scanning + push protection for the repo,
+      #     which needs no workflow at all and is the better answer if the org
+      #     plan includes it.
+      # Owner: Pacifique (infra/security, SPEC 09 §4).
+      # -----------------------------------------------------------------------
+      - name: History-aware secret scanning — NOT ENABLED
+        run: |
+          echo "::warning::No history-aware secret scanning is configured. secret-scan.sh reads the checkout only; a credential committed and later deleted is not detected. See the comment in .github/workflows/security.yml."
+
+  sast:
+    name: SAST — not enabled
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # -----------------------------------------------------------------------
+      # PLACEHOLDER — there is no static application security testing in this
+      # pipeline. SPEC 09 §3 requires it. Naming the gap explicitly is more
+      # useful than a step that lints and calls itself SAST.
+      #
+      # The two realistic options for a TypeScript monorepo:
+      #
+      #   - GitHub CodeQL (`github/codeql-action/init` + `analyze`, language
+      #     `javascript-typescript`). Free for public repos; for a private
+      #     GoR repo it needs GitHub Advanced Security. Best fit if the org
+      #     already has GHAS, because findings land in the Security tab
+      #     alongside Dependabot.
+      #
+      #   - Semgrep (`semgrep/semgrep-action`, or the CLI with `--config auto`).
+      #     No licence needed for the OSS ruleset, and it can carry
+      #     project-specific rules — which matters here: a rule that flags a
+      #     biometric buffer escaping the enrolment request would enforce
+      #     SPEC 07 §1 far better than the lexical guard in
+      #     .github/scripts/guard-non-negotiables.mjs ever can.
+      #
+      # Until one is chosen, the controls that DO exist are: the non-negotiables
+      # guard, TypeScript strict mode, zod validation at every boundary, and
+      # the external penetration test that gates production (SPEC 06 §8).
+      #
+      # Owner: Pacifique (infra/security, SPEC 09 §4). Decision belongs in
+      # docs/DECISIONS.md.
+      # -----------------------------------------------------------------------
+      - name: Declare the SAST gap
+        run: |
+          echo "::warning::No SAST tool is configured (SPEC 09 §3 asks for one). Candidates and the reason this is still open are documented in .github/workflows/security.yml."
+          {
+            echo "### SAST"
+            echo
+            echo "**Not enabled.** SPEC 09 §3 requires SAST; no tool is wired up yet."
+            echo "Candidates: GitHub CodeQL (needs GHAS on a private repo) or Semgrep."
+            echo "Owner: Pacifique. This job passes so it does not block delivery, and"
+            echo "warns so the gap stays visible on every run."
+          } >> "$GITHUB_STEP_SUMMARY"

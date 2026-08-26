@@ -1,5 +1,19 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "CI",
+    "NODE_ENV",
+    "DATABASE_URL",
+    "REDIS_URL",
+    "NID_PEPPER",
+    "ADMIN_API_TOKEN",
+    "KEYSTORE_DIR",
+    "SDID_STRATEGY",
+    "ATTESTATION_MODE",
+    "BROKER_PORT",
+    "BROKER_ISSUER",
+    "BROKER_URL"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
