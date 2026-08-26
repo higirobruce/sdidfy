@@ -5,6 +5,7 @@ import {
   createSdidProvider,
   MockSdidStrategy,
   ResilientSdidProvider,
+  SdidConfigurationError,
   type SdidAuditHookEvent,
 } from './index.js';
 // Imported directly (not via the package entry): the contract suite pulls in
@@ -33,10 +34,15 @@ runSdidProviderContractTests('createSdidProvider(mock) (resilience + audit wrapp
 }));
 
 describe('createSdidProvider', () => {
-  it('real strategies are gated on integration answers A1/A2', () => {
+  it('real strategies refuse to start unconfigured (fail closed, 02 §3 A1/A2)', () => {
+    // The strategies exist now (see oidc-esignet-strategy.spec.ts /
+    // proprietary-rest-strategy.spec.ts), but a deployment that has not
+    // supplied the A1/A2-dependent configuration must fail at construction —
+    // never boot into a state where SDID answers are guessed.
     for (const strategy of ['oidc', 'proprietary'] as const) {
+      expect(() => createSdidProvider({ strategy })).toThrow(SdidConfigurationError);
       expect(() => createSdidProvider({ strategy })).toThrow(
-        'SDID strategy pending integration answers A1/A2 (docs/SPEC.md 02 §3)',
+        new RegExp(`requires the \`${strategy}\` configuration block`),
       );
     }
   });

@@ -48,3 +48,30 @@ export class SdidMalformedResponseError extends SdidUnavailableError {
     this.name = 'SdidMalformedResponseError';
   }
 }
+
+/**
+ * A real strategy was asked to do something whose mechanics are still an open
+ * SDID integration question (02 §3 — A1 interface shape, A2 reference-template
+ * mechanics) and no deployment-supplied adapter filled the gap.
+ *
+ * Deliberately NOT a subtype of SdidUnavailableError: this is our own
+ * misconfiguration, not an SDID outage. It must never be retried, must never
+ * trip the circuit breaker, and must never be silently degraded into "identity
+ * unknown" — a guess here would return wrong data about a citizen. It carries
+ * only the option path and the open-question id; never identity data.
+ */
+export class SdidConfigurationError extends Error {
+  constructor(
+    /** Dotted option path the deployment must supply, e.g. `oidc.referenceBiometric`. */
+    readonly optionPath: string,
+    /** Open question(s) this gap is blocked on, e.g. `A2`. */
+    readonly openQuestion: string,
+    detail: string,
+  ) {
+    super(
+      `SDID adapter not configured: ${optionPath} is required — ${detail} ` +
+        `(blocked on docs/SPEC.md 02 §3 ${openQuestion}; do not guess a default)`,
+    );
+    this.name = 'SdidConfigurationError';
+  }
+}

@@ -10,6 +10,7 @@ import {
 } from '@sdid/shared';
 import {
   SdidCircuitOpenError,
+  SdidConfigurationError,
   SdidMalformedResponseError,
   SdidTimeoutError,
   SdidUnknownIdentityError,
@@ -216,6 +217,12 @@ export class ResilientSdidProvider implements SdidProvider {
         this.breaker.onSuccess();
         return result;
       } catch (err) {
+        if (err instanceof SdidConfigurationError) {
+          // An unfilled A1/A2 integration gap (02 §3) is our misconfiguration,
+          // not an SDID fault: retrying cannot fix it and tripping the breaker
+          // would mislabel a deployment bug as an outage. Surface it at once.
+          throw err;
+        }
         if (err instanceof SdidUnknownIdentityError) {
           // A definitive negative answer: the service is up (resets the
           // breaker) and retrying an idempotent read cannot change it.
