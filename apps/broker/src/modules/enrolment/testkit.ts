@@ -13,6 +13,9 @@ import {
   type ReferenceBiometricResult,
   type SdidProvider,
 } from '@sdid/shared';
+import { AnomalyModule } from '../../anomaly/anomaly.module.js';
+import { LoggingModule } from '../../logging/logging.module.js';
+import { ObservabilityModule } from '../../observability/observability.module.js';
 import { DbModule, DbService } from '../../db/db.module.js';
 import { RedisModule, RedisService } from '../../redis/redis.module.js';
 import { KeysModule } from '../../keys/keys.service.js';
@@ -215,6 +218,12 @@ export async function createTestApp(overrides?: {
 }): Promise<TestContext> {
   const builder = Test.createTestingModule({
     imports: [
+      // Observability/logging/anomaly are global infra the domain modules now
+      // inject; they must be present or DI fails at compile() (they are also
+      // in AppModule, so the test graph matches production).
+      ObservabilityModule,
+      LoggingModule,
+      AnomalyModule,
       DbModule,
       RedisModule,
       KeysModule,
@@ -270,7 +279,7 @@ export async function cleanTestData(ctx: TestContext, extraNids: string[] = []):
   // Reset this suite's rate-limit / lockout counters so reruns stay green
   // (fixed windows outlive a test run). Prefixes are enrolment-specific.
   const client = ctx.redis.client;
-  for (const pattern of ['rl:enrol:*', 'lockout:enrol:*', 'attnonce:*']) {
+  for (const pattern of ['rl:enrol:*', 'lockout:enrol:*', 'attnonce:*', 'anom:*']) {
     let cursor = '0';
     do {
       const [next, keys] = await client.scan(cursor, 'MATCH', pattern, 'COUNT', 500);

@@ -9,8 +9,11 @@ import {
 import { inArray } from 'drizzle-orm';
 import { randomBytes, webcrypto } from 'node:crypto';
 import request from 'supertest';
+import { AnomalyModule } from '../../anomaly/anomaly.module.js';
 import { AuditModule, AuditService } from '../../audit/audit.service.js';
 import { BridgeErrorFilter } from '../../common/bridge-error.filter.js';
+import { LoggingModule } from '../../logging/logging.module.js';
+import { ObservabilityModule } from '../../observability/observability.module.js';
 import { DbModule, DbService } from '../../db/db.module.js';
 import {
   authTransactions,
@@ -76,6 +79,10 @@ export async function createHarness(): Promise<Harness> {
 
   const moduleRef = await Test.createTestingModule({
     imports: [
+      // Global infra the domain modules inject (metrics, logger, anomaly).
+      ObservabilityModule,
+      LoggingModule,
+      AnomalyModule,
       DbModule,
       RedisModule,
       KeysModule,

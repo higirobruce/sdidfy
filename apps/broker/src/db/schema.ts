@@ -49,6 +49,16 @@ export const deviceBindings = pgTable(
     lastReassertedAt: timestamp('last_reasserted_at', { withTimezone: true }),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     revokeReason: text('revoke_reason'),
+    /**
+     * Wake-only push address (05 §5). Stored in the clear because it IS the
+     * address we must present to FCM/APNs — it cannot be hashed. It is a
+     * device handle, not a citizen identifier: it carries no identity, the
+     * providers rotate it, and it is cleared on revocation and whenever a
+     * provider reports it dead. Never logged (deny-listed in logging/redact.ts).
+     */
+    pushPlatform: text('push_platform'), // fcm|apns
+    pushToken: text('push_token'),
+    pushTokenUpdatedAt: timestamp('push_token_updated_at', { withTimezone: true }),
   },
   (t) => [index('device_bindings_citizen_idx').on(t.citizenId)],
 );

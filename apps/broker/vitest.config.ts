@@ -10,6 +10,13 @@ export default defineConfig({
     hookTimeout: 30000,
     testTimeout: 30000,
     fileParallelism: false,
+    env: {
+      // Silence the JSON request logger during tests: the suite asserts on
+      // behaviour, and one structured line per HTTP call would bury failures.
+      // Redaction and logger behaviour are tested directly in
+      // src/logging/redact.spec.ts against an explicit sink.
+      LOG_LEVEL: 'silent',
+    },
   },
   plugins: [
     swc.vite({

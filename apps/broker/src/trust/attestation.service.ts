@@ -6,6 +6,7 @@ import type {
   AttestationResult,
 } from '@sdid/attestation';
 import { loadConfig } from '../config.js';
+import { MetricsService } from '../observability/metrics.service.js';
 import { ChallengeService } from './challenge.service.js';
 import {
   ATTESTATION_VERIFIERS,
@@ -86,6 +87,7 @@ export class AttestationService {
 
   constructor(
     private readonly challenges: ChallengeService,
+    private readonly metrics: MetricsService,
     @Inject(ATTESTATION_VERIFIERS) private readonly verifiers: AttestationVerifierSource,
   ) {}
 
@@ -94,8 +96,35 @@ export class AttestationService {
     devicePublicKeyJwk: DevicePublicKeyJwk,
   ): Promise<AttestationVerdict> {
     const mode = loadConfig().ATTESTATION_MODE;
-    if (mode === 'strict') return this.verifyStrict(attestation, devicePublicKeyJwk);
-    return this.verifyMock(attestation);
+    // Metrics are recorded on every path — accepted, rejected (with the
+    // verifier's code, which is a bounded enum) and unavailable. Splitting
+    // "we refused this device" from "we could not check" is the difference
+    // between an attack and a platform outage, and an operator must be able
+    // to tell them apart from the dashboard alone.
+    try {
+      const verdict =
+        mode === 'strict'
+          ? await this.verifyStrict(attestation, devicePublicKeyJwk)
+          : await this.verifyMock(attestation);
+      this.metrics.recordAttestationVerdict({
+        platform: verdict.platform,
+        mode,
+        outcome: 'accepted',
+      });
+      return verdict;
+    } catch (err) {
+      const outcome =
+        err instanceof BridgeError && err.code === 'attestation_unavailable'
+          ? 'unavailable'
+          : 'rejected';
+      this.metrics.recordAttestationVerdict({
+        platform: attestation.platform,
+        mode,
+        outcome,
+        ...(err instanceof AttestationRejectionError ? { code: err.rejectionCode } : {}),
+      });
+      throw err;
+    }
   }
 
   // --- strict -------------------------------------------------------------

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { BridgeError } from '@sdid/shared';
+import { MetricsService, rateLimitScope } from '../observability/metrics.service.js';
 import { RedisService } from '../redis/redis.module.js';
 
 /**
@@ -9,14 +10,22 @@ import { RedisService } from '../redis/redis.module.js';
  */
 @Injectable()
 export class RateLimitService {
-  constructor(private readonly redis: RedisService) {}
+  constructor(
+    private readonly redis: RedisService,
+    private readonly metrics: MetricsService,
+  ) {}
 
   /** Throws rate_limited when `key` exceeds `limit` hits per `windowSeconds`. */
   async hit(key: string, limit: number, windowSeconds: number): Promise<void> {
     const redisKey = `rl:${key}`;
     const count = await this.redis.client.incr(redisKey);
     if (count === 1) await this.redis.client.expire(redisKey, windowSeconds);
-    if (count > limit) throw new BridgeError('rate_limited', 'Too many requests', 429);
+    if (count > limit) {
+      // Only the SCOPE is recorded — the key embeds a pseudo-NID, an IP or a
+      // binding id, none of which may become a metric label.
+      this.metrics.recordRateLimitHit(rateLimitScope(key));
+      throw new BridgeError('rate_limited', 'Too many requests', 429);
+    }
   }
 
   /**
@@ -35,6 +44,7 @@ export class RateLimitService {
   async assertNotLockedOut(key: string, maxFailures: number): Promise<void> {
     const count = await this.redis.client.get(`lockout:${key}`);
     if (count && Number(count) >= maxFailures) {
+      this.metrics.recordLockoutHit(rateLimitScope(key));
       throw new BridgeError('locked_out', 'Temporarily locked out', 429);
     }
   }

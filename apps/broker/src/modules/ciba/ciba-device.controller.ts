@@ -14,6 +14,7 @@ import { AuditService } from '../../audit/audit.service.js';
 import { ZodPipe } from '../../common/zod.pipe.js';
 import { DbService } from '../../db/db.module.js';
 import { authTransactions, deviceBindings, relyingParties } from '../../db/schema.js';
+import { MetricsService } from '../../observability/metrics.service.js';
 import { ChallengeService } from '../../trust/challenge.service.js';
 import { DeviceSessionGuard, type DeviceSession } from '../../trust/device-session.guard.js';
 import { ReverificationService } from '../../trust/reverification.service.js';
@@ -50,6 +51,7 @@ export class CibaDeviceController {
     private readonly signatures: SignatureService,
     private readonly audit: AuditService,
     private readonly reverification: ReverificationService,
+    private readonly metrics: MetricsService,
   ) {}
 
   @Get('pending')
@@ -162,9 +164,19 @@ export class CibaDeviceController {
       binding.devicePubkeyJwk as { kty: string; crv: string; x: string; y: string },
       payload,
       body.signature,
+      'ciba-decision',
     );
 
     const status = body.decision === 'approve' ? 'approved' : 'denied';
+    // A denial the citizen flagged suspicious is the T7 tripwire — it is
+    // counted separately here and fed to the anomaly detector via the audit
+    // stream, because "citizens are telling us these prompts are unexpected"
+    // is the clearest evidence of an approval-spraying campaign.
+    this.metrics.recordCibaDecision({
+      decision: body.decision,
+      flow: txn.flow,
+      suspicious: body.reportSuspicious === true,
+    });
     await db
       .update(authTransactions)
       .set({

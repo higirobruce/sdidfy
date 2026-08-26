@@ -30,6 +30,7 @@ import {
   deviceBindings,
 } from '../../db/schema.js';
 import { KeysService } from '../../keys/keys.service.js';
+import { MetricsService } from '../../observability/metrics.service.js';
 import { PushService } from '../../push/push.service.js';
 import { RedisService } from '../../redis/redis.module.js';
 import { SDID_PROVIDER } from '../../sdid/sdid.module.js';
@@ -75,6 +76,7 @@ export class OidcController {
     private readonly tokens: TokenService,
     private readonly pairwise: PairwiseService,
     private readonly push: PushService,
+    private readonly metrics: MetricsService,
     @Inject(SDID_PROVIDER) private readonly sdid: SdidProvider,
   ) {}
 
@@ -141,6 +143,9 @@ export class OidcController {
         .where(and(eq(authTransactions.id, txn.id), eq(authTransactions.status, 'pending')))
         .returning({ id: authTransactions.id });
       if (marked.length > 0) {
+        // Counted only on the transition, not on every poll that finds it
+        // already expired — otherwise the RP's poll interval sets the rate.
+        this.metrics.recordCibaExpiry(txn.flow);
         await this.audit.append({
           actor: { type: 'rp', id: rp.id },
           action: 'ciba.request_expired',
@@ -191,6 +196,7 @@ export class OidcController {
       acr,
       authTime,
     });
+    this.metrics.recordTokensIssued(CIBA_GRANT_TYPE);
 
     // The CIBA approval IS the consent event (04 §5) — record the grant.
     await db.insert(consentGrants).values({
@@ -259,6 +265,7 @@ export class OidcController {
       authTime: row.authTime,
       nonce: row.nonce,
     });
+    this.metrics.recordTokensIssued('authorization_code');
     await this.audit.append({
       actor: { type: 'rp', id: rp.id },
       action: 'oidc.tokens_issued',
@@ -472,6 +479,7 @@ export class OidcController {
     };
     await this.redis.client.set(`codeflow:${authReqId}`, JSON.stringify(stash), 'EX', ttlSeconds);
     await this.push.wake(citizenId); // wake-only, no auth data (T6)
+    this.metrics.recordCibaRequest('code');
     await this.audit.append({
       actor: { type: 'rp', id: rp.id },
       action: 'ciba.request_created',

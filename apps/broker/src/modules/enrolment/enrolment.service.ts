@@ -15,9 +15,11 @@ import {
   type ReferenceBiometricResult,
   type SdidProvider,
 } from '@sdid/shared';
+import { AnomalyService } from '../../anomaly/anomaly.service.js';
 import { DbService } from '../../db/db.module.js';
 import { citizens, deviceBindings } from '../../db/schema.js';
 import { AuditService } from '../../audit/audit.service.js';
+import { MetricsService } from '../../observability/metrics.service.js';
 import {
   AttestationRejectionError,
   AttestationService,
@@ -83,6 +85,8 @@ export class EnrolmentService {
     private readonly pairwise: PairwiseService,
     private readonly rateLimit: RateLimitService,
     private readonly signatures: SignatureService,
+    private readonly metrics: MetricsService,
+    private readonly anomaly: AnomalyService,
     @Inject(SDID_PROVIDER) private readonly sdid: SdidProvider,
     @Inject(MATCH_ENGINE) private readonly matchEngine: MatchEngine,
   ) {}
@@ -109,6 +113,12 @@ export class EnrolmentService {
 
   async start(req: EnrolStartRequest, ip: string): Promise<EnrolStartResponse> {
     const pseudoNid = this.pairwise.pseudoNid(req.nid);
+
+    // Anomaly signal BEFORE the rate limits (06 §5, T14): probing is measured
+    // in DISTINCT identities per source, and a limit that refuses the 21st
+    // attempt would otherwise hide the 30 different NIDs behind it. Detection
+    // only — nothing here refuses anything.
+    await this.anomaly.recordEnrolmentAttempt(ip, pseudoNid);
 
     // Anti-automation (T14): per-NID and per-IP fixed windows, plus the
     // failure lockout accumulated by recordFailure below.
@@ -140,12 +150,24 @@ export class EnrolmentService {
             : { detail: err instanceof BridgeError ? err.message : 'attestation error' }),
         },
       });
+      if (err instanceof AttestationRejectionError) {
+        this.metrics.recordEnrolmentAttempt('attestation_rejected');
+        // T2/T3: a source producing rejection after rejection is a rooted-
+        // device farm — or a broken app release. Detection only.
+        await this.anomaly.recordAttestationRejection(ip, err.rejectionCode);
+      } else if (err instanceof BridgeError && err.code === 'attestation_unavailable') {
+        // OUR outage, not their attack: never counted as an abuse signal.
+        this.metrics.recordEnrolmentAttempt('attestation_unavailable');
+      } else {
+        this.metrics.recordEnrolmentAttempt('error');
+      }
       throw err;
     }
 
     // v1 is face-only self-service (appendix D1): phone fingerprint sensors
     // cannot produce a print matchable against NIDA.
     if (req.sample.modality === 'fingerprint') {
+      this.metrics.recordEnrolmentAttempt('modality_unsupported');
       throw new BridgeError(
         'invalid_request',
         'Fingerprint enrolment is not supported; use face',
@@ -176,6 +198,7 @@ export class EnrolmentService {
           throw await this.failEnrolment(pseudoNid, 'sdid_identity_not_matchable');
         }
         if (isSdidUnavailableError(err)) {
+          this.metrics.recordEnrolmentAttempt('sdid_unavailable');
           throw new BridgeError('sdid_unavailable', 'Identity authority unavailable', 503);
         }
         throw err;
@@ -190,6 +213,12 @@ export class EnrolmentService {
       zeroize(sampleBytes, reference?.reference.data);
     }
     // --- Biometric window closed: only MatchResult + txnRef survive. ---
+
+    // Score BAND only, and with no subject label of any kind (07 §4, T18):
+    // band distribution over time is how a matching-engine regression or an
+    // evasion campaign becomes visible, and it is the most that can be
+    // published about a biometric comparison without publishing a biometric.
+    this.metrics.recordBiometricMatch(matchResult);
 
     await this.audit.append({
       actor: { type: 'citizen' },
@@ -231,6 +260,7 @@ export class EnrolmentService {
         and(eq(deviceBindings.citizenId, citizenId), ne(deviceBindings.status, 'revoked')),
       )) as [{ count: number }];
     if (count >= MAX_ACTIVE_BINDINGS) {
+      this.metrics.recordEnrolmentAttempt('device_limit_reached');
       await this.audit.append({
         actor: { type: 'citizen', id: citizenId },
         action: 'enrolment.failed',
@@ -273,6 +303,9 @@ export class EnrolmentService {
 
     // Proof-of-possession challenge (03 §2 steps 8–10).
     const activationChallenge = await this.challenges.issue({ kind: 'activation' }, bindingId);
+    // The binding exists and the challenge is out; activation is a separate
+    // request, so `success` here means "the biometric proofing leg passed".
+    this.metrics.recordEnrolmentAttempt('success');
 
     return {
       bindingId,
@@ -293,9 +326,12 @@ export class EnrolmentService {
    */
   private async failEnrolment(
     pseudoNid: string,
-    reason: string,
+    reason: 'match_failed' | 'pad_failed' | 'sdid_identity_not_matchable',
     sdidTxnRef?: string,
   ): Promise<BridgeError> {
+    this.metrics.recordEnrolmentAttempt(
+      reason === 'sdid_identity_not_matchable' ? 'identity_not_matchable' : reason,
+    );
     await this.audit.append({
       actor: { type: 'citizen' },
       action: 'enrolment.failed',
@@ -334,6 +370,7 @@ export class EnrolmentService {
       binding.devicePubkeyJwk as { kty: string; crv: string; x: string; y: string },
       payload,
       req.signature,
+      'activation',
     );
 
     await this.dbService.db

@@ -1,7 +1,8 @@
-import { Global, Injectable, Module } from '@nestjs/common';
+import { Global, Injectable, Logger, Module } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { uuidv7, type AuditEventInput } from '@sdid/shared';
 import { DbService } from '../db/db.module.js';
+import { MetricsService } from '../observability/metrics.service.js';
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -25,9 +26,33 @@ const CHAIN_LOCK_KEY = 429_001; // pg advisory lock guarding chain linearity
  * Audit MUST NOT be best-effort for security events: callers await append()
  * and a failed audit write fails the operation (no unaudited state change).
  */
+/**
+ * Notified after a row is durably committed. Observers are the audit-stream
+ * consumers described in 06 §5 (anomaly detection); they never influence the
+ * append, and an observer error is swallowed.
+ */
+export type AuditObserver = (event: AuditEventInput) => void;
+
 @Injectable()
 export class AuditService {
-  constructor(private readonly dbService: DbService) {}
+  private readonly logger = new Logger('AuditService');
+  private readonly observers: AuditObserver[] = [];
+
+  constructor(
+    private readonly dbService: DbService,
+    private readonly metrics: MetricsService,
+  ) {}
+
+  /**
+   * Subscribe to the committed audit stream (06 §5). Deliberately in-process
+   * and post-commit: a subscriber sees only events that actually made it into
+   * the tamper-evident chain, and cannot roll one back. Nothing here is a
+   * durable queue — a broker restart loses in-flight detector windows, which
+   * is acceptable for a signal whose windows are minutes long.
+   */
+  subscribe(observer: AuditObserver): void {
+    this.observers.push(observer);
+  }
 
   async append(event: AuditEventInput): Promise<{ id: string; hash: string }> {
     const id = uuidv7();
@@ -62,12 +87,31 @@ export class AuditService {
         ],
       );
       await client.query('COMMIT');
+      this.metrics.recordAuditAppend(true);
+      this.notify(event);
       return { id, hash };
     } catch (err) {
       await client.query('ROLLBACK');
+      // A failed append fails the operation it was recording (no unaudited
+      // state change), so this counter is an "the auth path is refusing work"
+      // signal, not a background error rate — alert on any non-zero value.
+      this.metrics.recordAuditAppend(false);
       throw err;
     } finally {
       client.release();
+    }
+  }
+
+  /** Fan out to observers. Post-commit, isolated, and never able to throw. */
+  private notify(event: AuditEventInput): void {
+    for (const observer of this.observers) {
+      try {
+        observer(event);
+      } catch (err) {
+        this.logger.warn(
+          `audit observer threw: ${err instanceof Error ? err.message : 'unknown'}`,
+        );
+      }
     }
   }
 
