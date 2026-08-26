@@ -1,0 +1,32 @@
+{
+  // FULL app typecheck — includes src/ui and the src/native *.rn.ts glue.
+  //
+  // This config FAILS TODAY, on purpose and by design: `react`, `react-native`
+  // and their type packages are not installed in this monorepo (the network is
+  // restricted and adding them would break every other package's install).
+  // Run it only after installing the dependency set documented in
+  // docs/rn-dependencies.md:
+  //
+  //     pnpm --filter @sdid/mobile exec tsc -p tsconfig.app.json --noEmit
+  //
+  // `tsconfig.json` is what CI and `pnpm --filter @sdid/mobile typecheck` use;
+  // it covers src/core, src/i18n and the src/native contracts, which is where
+  // every security-critical decision in this app lives.
+  //
+  // Note the resolution change: React Native's Metro bundler does not apply
+  // TypeScript's NodeNext `.js` → `.ts` remapping, so the app build uses
+  // "bundler" resolution. The `.js` extensions on relative imports (the house
+  // rule) still need a Metro resolver shim — see README §"Metro and .js
+  // extensions".
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM"],
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["react", "react-native"]
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@sdid/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Citizen mobile authenticator for the SDID Auth Bridge (spec 05). src/core is plain TypeScript and runs under vitest; src/ui and src/native/*.rn.ts need a React Native toolchain (see README).",
+  "main": "dist/core/index.js",
+  "types": "dist/core/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@sdid/shared": "workspace:*",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "comment:react-native-dependencies": [
+    "The React Native / Expo dependency set this app needs is deliberately NOT",
+    "installed in this monorepo and NOT listed above. Adding it here would break",
+    "`pnpm --filter @sdid/mobile typecheck|test` for everyone until a full native",
+    "toolchain exists. The exact package list, versions and rationale live in",
+    "docs/rn-dependencies.md; the README explains the split."
+  ]
+}
