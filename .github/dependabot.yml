@@ -1,0 +1,71 @@
+version: 2
+
+# Dependency scanning, the half of SPEC 09 §3 that GitHub gives us natively —
+# no tool to install, no licence, no new dependency in the repo.
+#
+# `pnpm audit` in .github/workflows/security.yml tells us a vulnerable version
+# is installed. Dependabot is what actually gets it replaced. They are not
+# alternatives.
+#
+# Grouped and rate-limited on purpose: an ungrouped Dependabot on a monorepo
+# opens twenty PRs a week and gets muted within a month, which is worse than
+# not having it.
+
+updates:
+  # ---------------------------------------------------------------------------
+  # Workspace dependencies. Dependabot reads pnpm-lock.yaml and opens PRs
+  # against the root; workspace packages are covered from here.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '05:00'
+      timezone: Africa/Kigali
+    open-pull-requests-limit: 5
+    groups:
+      # Patch and minor bumps of dev tooling: one PR, low review cost.
+      dev-tooling:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      # Runtime dependency minors/patches, likewise batched. Majors stay
+      # ungrouped so each one gets its own PR and its own read of the
+      # changelog — `jose`, `drizzle-orm` and `@nestjs/*` majors all move
+      # token-minting or audit-write behaviour.
+      runtime-minor-patch:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+    commit-message:
+      prefix: deps
+      prefix-development: deps-dev
+
+  # ---------------------------------------------------------------------------
+  # The actions used by .github/workflows/*.yml. These run with access to the
+  # repository, so a stale or compromised action is a supply-chain problem in
+  # its own right.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '05:00'
+      timezone: Africa/Kigali
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: ci

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { webcrypto } from 'node:crypto';
 import { BridgeError } from '@sdid/shared';
+import { MetricsService, type SignatureContext } from '../observability/metrics.service.js';
 
 /**
  * Verifies device signatures — the heart of the trust chain (01 §2.2).
@@ -10,12 +11,22 @@ import { BridgeError } from '@sdid/shared';
  */
 @Injectable()
 export class SignatureService {
+  constructor(private readonly metrics: MetricsService) {}
+
+  /**
+   * `context` names the flow doing the verifying (activation / login / CIBA
+   * decision) so a failure spike can be attributed to one leg of the trust
+   * chain. It is a bounded enum, never the binding id — per-binding bursts are
+   * the anomaly detector's job (06 §5), not a metric label.
+   */
   async verifyDeviceSignature(
     devicePublicKeyJwk: { kty: string; crv: string; x: string; y: string },
     payload: string,
     signatureB64url: string,
+    context: SignatureContext = 'unspecified',
   ): Promise<void> {
     if (devicePublicKeyJwk.kty !== 'EC' || devicePublicKeyJwk.crv !== 'P-256') {
+      this.metrics.recordSignatureFailure(context);
       throw new BridgeError('signature_invalid', 'Unsupported device key type', 400);
     }
     let ok = false;
@@ -37,6 +48,9 @@ export class SignatureService {
     } catch {
       ok = false;
     }
-    if (!ok) throw new BridgeError('signature_invalid', 'Device signature verification failed', 401);
+    if (!ok) {
+      this.metrics.recordSignatureFailure(context);
+      throw new BridgeError('signature_invalid', 'Device signature verification failed', 401);
+    }
   }
 }

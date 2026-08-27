@@ -30,6 +30,7 @@ export function withAuditHook(
   inner: SdidProvider,
   onAudit: SdidAuditHook | undefined,
   strategy: SdidStrategyName,
+  nidPepper: string,
 ): SdidProvider {
   if (!onAudit) return inner;
 
@@ -82,7 +83,7 @@ export function withAuditHook(
     getReferenceBiometric: (input: { nid: string; modality: BiometricModality }) =>
       instrument<ReferenceBiometricResult>(
         'sdid.reference_fetched',
-        auditSubjectRef(input.nid),
+        auditSubjectRef(input.nid, nidPepper),
         { modality: input.modality },
         () => inner.getReferenceBiometric(input),
         (r) => r.txnRef,
@@ -90,7 +91,7 @@ export function withAuditHook(
     getAttributes: (idOrSubject: string, scopes: string[]) =>
       instrument<AttributeSet>(
         'sdid.reference_fetched',
-        auditSubjectRef(idOrSubject),
+        auditSubjectRef(idOrSubject, nidPepper),
         { scopes: [...scopes] },
         () => inner.getAttributes(idOrSubject, scopes),
         () => undefined,
@@ -98,7 +99,7 @@ export function withAuditHook(
     reassert: (idOrSubject: string) =>
       instrument<ReassertResult>(
         'sdid.reassert',
-        auditSubjectRef(idOrSubject),
+        auditSubjectRef(idOrSubject, nidPepper),
         {},
         () => inner.reassert(idOrSubject),
         (r) => r.txnRef,

@@ -100,7 +100,17 @@ export class ReverificationService {
       await db.update(citizens).set({ status: 'suspended', updatedAt: now }).where(eq(citizens.id, citizenId));
       await db
         .update(deviceBindings)
-        .set({ status: 'revoked', revokedAt: now, revokeReason: 'sdid-reassert-invalid' })
+        .set({
+          status: 'revoked',
+          revokedAt: now,
+          revokeReason: 'sdid-reassert-invalid',
+          // Same statement as the revocation: a suspended identity's devices
+          // must stop being woken at once, and their push addresses are no
+          // longer ours to hold (05 §5, 06 §4).
+          pushPlatform: null,
+          pushToken: null,
+          pushTokenUpdatedAt: now,
+        })
         .where(and(eq(deviceBindings.citizenId, citizenId), eq(deviceBindings.status, 'active')));
       await this.audit.append({
         actor: { type: 'system' },

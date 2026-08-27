@@ -1,4 +1,7 @@
 import { Module } from '@nestjs/common';
+import { AnomalyModule } from './anomaly/anomaly.module.js';
+import { LoggingModule } from './logging/logging.module.js';
+import { ObservabilityModule } from './observability/observability.module.js';
 import { DbModule } from './db/db.module.js';
 import { RedisModule } from './redis/redis.module.js';
 import { KeysModule } from './keys/keys.service.js';
@@ -15,11 +18,15 @@ import { RpModule } from './modules/rp/rp.module.js';
 
 @Module({
   imports: [
-    // Infra (global)
+    // Infra (global). Observability and logging come first so metrics and the
+    // request-logging interceptor exist before anything that records into them.
+    ObservabilityModule,
+    LoggingModule,
     DbModule,
     RedisModule,
     KeysModule,
     AuditModule,
+    AnomalyModule,
     TrustModule,
     PushModule,
     SdidModule,

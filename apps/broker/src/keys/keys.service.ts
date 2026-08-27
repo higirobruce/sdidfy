@@ -55,6 +55,34 @@ export class KeysService implements OnModuleInit {
     return loadConfig().BROKER_ISSUER;
   }
 
+  /**
+   * Readiness probe (/readyz): can this replica actually SIGN?
+   *
+   * It performs a real signature rather than checking that a row or a variable
+   * exists, because "the key is present" and "the key is usable" are different
+   * facts, and only the second one determines whether a citizen can be issued
+   * a token. Today they nearly always coincide (the private JWK is imported
+   * once at boot); once custody moves to KMS/HSM (decision #5) they diverge
+   * exactly when it matters — an expired credential, a revoked grant, an
+   * unreachable HSM — and this probe is what takes the replica out of rotation
+   * instead of failing citizens' logins. ES256 over a few bytes is cheap
+   * enough to run on every probe.
+   *
+   * The probe token is never returned to anyone: it exists only to be signed.
+   */
+  async probeSigning(): Promise<void> {
+    if (!this.activeKid || this.publicJwks.keys.length === 0) {
+      throw new Error('no active signing key loaded');
+    }
+    await new jose.SignJWT({ probe: true })
+      .setProtectedHeader({ alg: 'ES256', kid: this.activeKid, typ: 'JWT' })
+      .setIssuer(this.issuer)
+      .setAudience('readiness-probe')
+      .setIssuedAt()
+      .setExpirationTime('60s')
+      .sign(this.privateKey);
+  }
+
   jwks(): jose.JSONWebKeySet {
     return this.publicJwks;
   }

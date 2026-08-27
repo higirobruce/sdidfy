@@ -16,6 +16,7 @@ import { ZodPipe } from '../../common/zod.pipe.js';
 import { loadConfig } from '../../config.js';
 import { DbService } from '../../db/db.module.js';
 import { authTransactions, deviceBindings } from '../../db/schema.js';
+import { MetricsService } from '../../observability/metrics.service.js';
 import { PushService } from '../../push/push.service.js';
 import { PairwiseService } from '../../trust/pairwise.service.js';
 import { RateLimitService } from '../../trust/rate-limit.service.js';
@@ -37,6 +38,7 @@ export class CibaController {
     private readonly pairwise: PairwiseService,
     private readonly push: PushService,
     private readonly audit: AuditService,
+    private readonly metrics: MetricsService,
   ) {}
 
   @Post('oidc/bc-authorize')
@@ -92,6 +94,10 @@ export class CibaController {
       expiresAt: new Date(Date.now() + expiresIn * 1000),
     });
     await this.push.wake(citizenId); // wake-only, no auth data (T6)
+    // Flow label only — never the RP id. Per-RP volume is a legitimate
+    // operational question, but as a metric label an rp uuid is unbounded
+    // cardinality; per-RP abuse is the anomaly detector's job (06 §5).
+    this.metrics.recordCibaRequest('ciba');
     await this.audit.append({
       actor: { type: 'rp', id: rp.id },
       action: 'ciba.request_created',

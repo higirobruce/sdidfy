@@ -1,12 +1,13 @@
-import { createHash } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 
 /**
  * Pseudonymous SDID subject for a NID: 'sdid-' + first 16 hex chars of
- * sha256(nid) (Q8 — pseudonymised NID). This is the only identity form that
- * may appear in audit records; raw NIDs never leave the call path.
+ * HMAC-SHA256(pepper, nid) (Q8 — pseudonymised NID). This is the only identity form that
+ * may appear in audit records; raw NIDs never leave the call path. The pepper
+ * is a keying secret so a DB dump alone cannot be reversed to raw NIDs.
  */
-export function sdidSubjectForNid(nid: string): string {
-  return `sdid-${createHash('sha256').update(nid).digest('hex').slice(0, 16)}`;
+export function sdidSubjectForNid(nid: string, pepper: string): string {
+  return `sdid-${createHmac('sha256', pepper).update(nid).digest('hex').slice(0, 16)}`;
 }
 
 const SUBJECT_SHAPE = /^sdid-[0-9a-f]{16}$/;
@@ -22,6 +23,6 @@ export function isSdidSubject(id: string): boolean {
  * stored sdidSubject — re-hashing it would break audit correlation with the
  * enrolment records); a raw NID is hashed so it never reaches the audit trail.
  */
-export function auditSubjectRef(id: string): string {
-  return isSdidSubject(id) ? id : sdidSubjectForNid(id);
+export function auditSubjectRef(id: string, pepper: string): string {
+  return isSdidSubject(id) ? id : sdidSubjectForNid(id, pepper);
 }

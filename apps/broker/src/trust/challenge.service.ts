@@ -51,6 +51,46 @@ export class ChallengeService {
   }
 
   /**
+   * Mint a single-use attestation nonce (03 §2 step 1, T4). Unlike the signing
+   * challenges above there is no binding yet — enrolment has not started — and
+   * no `sdid-bridge:` payload: the nonce travels *inside* the Play Integrity /
+   * App Attest token, under the platform's own signature. What it shares is
+   * the property that matters: server-issued, single-use, short-TTL.
+   *
+   * Kept in its own key space (`attnonce:`) because its TTL differs from the
+   * signing challenges' and an attestation nonce must never be usable as a
+   * signing challenge (or vice versa); the stored purpose enforces that even
+   * if the key spaces were ever merged.
+   */
+  async issueAttestationNonce(): Promise<{ nonceId: string; nonce: string; expiresAt: string }> {
+    const ttl = loadConfig().ATTESTATION_NONCE_TTL_SECONDS;
+    const nonceId = randomBytes(16).toString('base64url');
+    // 32 bytes of CSPRNG — the floor both Play Integrity and App Attest
+    // guidance assume for an unguessable server challenge.
+    const nonce = randomBytes(32).toString('base64url');
+    const record = JSON.stringify({ purpose: purposeString({ kind: 'attestation' }), nonce });
+    await this.redis.client.set(`attnonce:${nonceId}`, record, 'EX', ttl);
+    return { nonceId, nonce, expiresAt: new Date(Date.now() + ttl * 1000).toISOString() };
+  }
+
+  /**
+   * Atomically consume an attestation nonce and return its value. GETDEL means
+   * a second use of the same nonceId — a replay — finds nothing and throws,
+   * even under concurrent requests.
+   */
+  async consumeAttestationNonce(nonceId: string): Promise<string> {
+    const raw = await this.redis.client.getdel(`attnonce:${nonceId}`);
+    if (!raw) {
+      throw new BridgeError('challenge_invalid', 'Unknown, expired, or already-used attestation nonce', 400);
+    }
+    const record = JSON.parse(raw) as { purpose: string; nonce: string };
+    if (record.purpose !== purposeString({ kind: 'attestation' })) {
+      throw new BridgeError('challenge_invalid', 'Challenge purpose mismatch', 400);
+    }
+    return record.nonce;
+  }
+
+  /**
    * CIBA challenges allow two alternative consumptions of one nonce: the
    * device signs EITHER the approve payload OR the deny payload (so denials
    * are authentic too). Stored purpose is `ciba:<authReqId>`; consumption

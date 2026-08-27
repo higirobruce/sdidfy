@@ -1,0 +1,19 @@
+{
+  // Build/typecheck config for the part of the app that compiles WITHOUT a
+  // React Native toolchain: src/core (pure TS protocol client), src/i18n
+  // (plain string tables) and the src/native *contracts* (interfaces only).
+  //
+  // Deliberately excluded — they import `react`/`react-native`, which are not
+  // installed in this monorepo (see README "What is real and what is not"):
+  //   src/ui/**            — the RN screens
+  //   src/native/*.rn.ts   — the NativeModules glue behind the contracts
+  // `tsconfig.app.json` includes those and is what a developer runs once the
+  // RN dependency set from docs/rn-dependencies.md is installed.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/core", "src/i18n", "src/native"],
+  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts", "src/**/*.rn.ts", "src/**/*.rn.tsx"]
+}

@@ -9,12 +9,16 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
+    "test": "turbo run test --concurrency=1",
     "lint": "turbo run lint",
     "db:migrate": "pnpm --filter @sdid/broker db:migrate",
     "broker:dev": "pnpm --filter @sdid/broker dev",
     "demo:ghost-login": "pnpm --filter @sdid/e2e demo",
-    "test:e2e": "pnpm --filter @sdid/e2e test"
+    "test:e2e": "pnpm --filter @sdid/e2e test",
+    "verify": "pnpm typecheck && pnpm build && pnpm test && pnpm demo:ghost-login",
+    "ci:guard": "node .github/scripts/guard-non-negotiables.mjs",
+    "ci:secret-scan": "bash .github/scripts/secret-scan.sh",
+    "ci:audit-append-only": "bash .github/scripts/check-audit-append-only.sh"
   },
   "devDependencies": {
     "turbo": "^2.5.0",

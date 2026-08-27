@@ -18,6 +18,8 @@ import { sdidSubjectForNid } from './pseudonym.js';
  * NID so enrolment/match/userinfo tests are repeatable.
  */
 export interface MockSdidStrategyOptions {
+  /** NID pepper for pseudonymisation (Q8, 10). */
+  nidPepper?: string;
   /** Simulated per-call latency. Env SDID_MOCK_LATENCY_MS overrides. */
   latencyMs?: number;
   /** Probability 0..1 that a call fails with SdidUnavailableError. Env SDID_MOCK_FAILURE_RATE overrides. */
@@ -56,6 +58,7 @@ function mockTxnRef(): string {
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 
 export class MockSdidStrategy implements SdidProvider {
+  private readonly nidPepper: string;
   private readonly latencyMs: number;
   private readonly failureRate: number;
   private failNextCalls: number;
@@ -63,12 +66,13 @@ export class MockSdidStrategy implements SdidProvider {
   private readonly subjectToNid = new Map<string, string>();
 
   constructor(opts: MockSdidStrategyOptions = {}) {
+    this.nidPepper = opts.nidPepper ?? 'dev-only-nid-pepper-change-me';
     const envLatency = Number.parseInt(process.env.SDID_MOCK_LATENCY_MS ?? '', 10);
     const envFailureRate = Number.parseFloat(process.env.SDID_MOCK_FAILURE_RATE ?? '');
     this.latencyMs = Number.isFinite(envLatency) ? envLatency : (opts.latencyMs ?? 0);
     this.failureRate = Number.isFinite(envFailureRate) ? envFailureRate : (opts.failureRate ?? 0);
     this.failNextCalls = opts.failNextCalls ?? 0;
-    for (const nid of MOCK_TEST_NIDS) this.subjectToNid.set(sdidSubjectForNid(nid), nid);
+    for (const nid of MOCK_TEST_NIDS) this.subjectToNid.set(sdidSubjectForNid(nid, this.nidPepper), nid);
   }
 
   /** Latency + failure injection for resilience testing (09 §3). */
@@ -103,7 +107,7 @@ export class MockSdidStrategy implements SdidProvider {
         data: mockBiometricBytes(nid, input.modality),
         format: 'mock',
       },
-      sdidSubject: sdidSubjectForNid(nid),
+      sdidSubject: sdidSubjectForNid(nid, this.nidPepper),
       txnRef: mockTxnRef(),
     };
   }

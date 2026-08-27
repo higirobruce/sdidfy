@@ -1,10 +1,11 @@
-import { createHash } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { MOCK_TEST_NIDS } from '@sdid/shared';
 import {
   createSdidProvider,
   MockSdidStrategy,
   ResilientSdidProvider,
+  SdidConfigurationError,
   type SdidAuditHookEvent,
 } from './index.js';
 // Imported directly (not via the package entry): the contract suite pulls in
@@ -13,13 +14,14 @@ import { runSdidProviderContractTests } from './contract-tests.js';
 
 const KNOWN = MOCK_TEST_NIDS[1];
 const UNKNOWN = '1190000000000000';
+const DEFAULT_PEPPER = 'dev-only-nid-pepper-change-me';
 
 const expectedSubjectRef = (id: string): string =>
-  `sdid-${createHash('sha256').update(id).digest('hex').slice(0, 16)}`;
+  `sdid-${createHmac('sha256', DEFAULT_PEPPER).update(id).digest('hex').slice(0, 16)}`;
 
 // Contract suite (spec 09 §3) against the bare mock strategy...
 runSdidProviderContractTests('MockSdidStrategy (bare)', () => ({
-  provider: new MockSdidStrategy(),
+  provider: new MockSdidStrategy({ nidPepper: DEFAULT_PEPPER }),
   knownNid: MOCK_TEST_NIDS[0],
   unknownNid: UNKNOWN,
 }));
@@ -32,10 +34,15 @@ runSdidProviderContractTests('createSdidProvider(mock) (resilience + audit wrapp
 }));
 
 describe('createSdidProvider', () => {
-  it('real strategies are gated on integration answers A1/A2', () => {
+  it('real strategies refuse to start unconfigured (fail closed, 02 §3 A1/A2)', () => {
+    // The strategies exist now (see oidc-esignet-strategy.spec.ts /
+    // proprietary-rest-strategy.spec.ts), but a deployment that has not
+    // supplied the A1/A2-dependent configuration must fail at construction —
+    // never boot into a state where SDID answers are guessed.
     for (const strategy of ['oidc', 'proprietary'] as const) {
+      expect(() => createSdidProvider({ strategy })).toThrow(SdidConfigurationError);
       expect(() => createSdidProvider({ strategy })).toThrow(
-        'SDID strategy pending integration answers A1/A2 (docs/SPEC.md 02 §3)',
+        new RegExp(`requires the \`${strategy}\` configuration block`),
       );
     }
   });

@@ -23,6 +23,7 @@ import {
   type IssuedChallenge,
   type LoginRequest,
   type PendingTransaction,
+  attestationChallengeResponseSchema,
   enrolActivateResponseSchema,
   enrolStartResponseSchema,
   loginResponseSchema,
@@ -61,6 +62,15 @@ export interface MockAttestationDto {
   platform: 'sim';
   token: string;
   keyAttestation: string;
+  /** Handle of the server-issued nonce burned by this attestation (T4). */
+  nonceId?: string;
+}
+
+/** A server-issued attestation nonce, as minted by the broker. */
+export interface AttestationChallenge {
+  nonceId: string;
+  nonce: string;
+  expiresAt: string;
 }
 
 export interface AttestationClaimOverrides {
@@ -189,28 +199,54 @@ export class SimDevice {
   /**
    * Mock device/app attestation (05 §4). Overrides simulate failure modes,
    * e.g. { deviceIntegrity: false } for a rooted device.
+   *
+   * When a server-issued `challenge` is supplied, the nonce is embedded INSIDE
+   * the token (as Play Integrity / App Attest bind it under the platform
+   * signature) and its handle rides alongside as `nonceId` — the production
+   * shape, so the strict-mode flow is the same flow with a real verifier.
    */
-  mockAttestation(overrides?: AttestationClaimOverrides): MockAttestationDto {
+  mockAttestation(
+    overrides?: AttestationClaimOverrides,
+    challenge?: AttestationChallenge,
+  ): MockAttestationDto {
     const claims = {
       mock: true,
       deviceIntegrity: true,
       appIntegrity: true,
       hardwareBackedKey: true,
+      ...(challenge ? { nonce: challenge.nonce } : {}),
       ...overrides,
     };
     return {
       platform: 'sim',
       token: Buffer.from(JSON.stringify(claims), 'utf8').toString('base64url'),
       keyAttestation: 'mock-key-attestation-v1',
+      ...(challenge ? { nonceId: challenge.nonceId } : {}),
     };
   }
 
-  /** Full enrolment (03 §2): start → sign activation challenge → activate. */
+  /**
+   * Fetch a single-use attestation nonce from the broker (03 §2 step 1).
+   * A real app hands `nonce` to Play Integrity / App Attest before it builds
+   * the token; the sim embeds it in the mock token instead.
+   */
+  async requestAttestationNonce(): Promise<AttestationChallenge> {
+    return attestationChallengeResponseSchema.parse(
+      await this.request('POST', '/v1/enrol/attestation-challenge'),
+    );
+  }
+
+  /** Full enrolment (03 §2): nonce → start → sign activation challenge → activate. */
   async enrol(opts?: EnrolOptions): Promise<EnrolResult> {
+    // Step 1: mint the attestation nonce BEFORE attesting, so the token is
+    // bound to a challenge this broker issued and can never be replayed from
+    // another device (T4). Mock mode tolerates its absence; the sim always
+    // sends it so the mock path mirrors the production sequence exactly.
+    const attestationChallenge = await this.requestAttestationNonce();
     const startBody: EnrolStartRequest = {
       nid: this.nid,
       devicePublicKeyJwk: await this.publicKeyJwk(),
-      attestation: this.mockAttestation(opts?.attestationOverrides),
+      attestation: this.mockAttestation(opts?.attestationOverrides, attestationChallenge),
       deviceLabel: this.deviceLabel,
       sample: this.captureBiometric(opts?.sampleOverrides),
     };

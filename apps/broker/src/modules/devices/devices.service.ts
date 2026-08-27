@@ -13,6 +13,8 @@ import { DbService } from '../../db/db.module.js';
 import { auditEvents, deviceBindings, relyingParties } from '../../db/schema.js';
 import { AuditService } from '../../audit/audit.service.js';
 import { KeysService } from '../../keys/keys.service.js';
+import { PushService } from '../../push/push.service.js';
+import type { PushPlatform } from '../../push/push-transport.js';
 import { ChallengeService } from '../../trust/challenge.service.js';
 import { DEVICE_SESSION_AUDIENCE } from '../../trust/device-session.guard.js';
 import { RateLimitService } from '../../trust/rate-limit.service.js';
@@ -47,6 +49,7 @@ export class DevicesService {
     private readonly rateLimit: RateLimitService,
     private readonly signatures: SignatureService,
     private readonly reverification: ReverificationService,
+    private readonly push: PushService,
   ) {}
 
   private async loadBinding(bindingId: string): Promise<BindingRow> {
@@ -96,6 +99,7 @@ export class DevicesService {
         binding.devicePubkeyJwk as { kty: string; crv: string; x: string; y: string },
         payload,
         req.signature,
+        'login',
       );
     } catch (err) {
       await this.rateLimit.recordFailure(
@@ -189,7 +193,18 @@ export class DevicesService {
     const revokeReason = reason ?? 'citizen-revoked';
     await this.dbService.db
       .update(deviceBindings)
-      .set({ status: 'revoked', revokedAt: new Date(), revokeReason })
+      .set({
+        status: 'revoked',
+        revokedAt: new Date(),
+        revokeReason,
+        // Revocation drops the push address in the SAME statement (06 §4 —
+        // revocation must be effective in seconds). A revoked device must stop
+        // being woken immediately, and a lost or stolen phone's notification
+        // address is not something we have any remaining basis to hold.
+        pushPlatform: null,
+        pushToken: null,
+        pushTokenUpdatedAt: new Date(),
+      })
       .where(eq(deviceBindings.id, bindingId));
     await this.audit.append({
       actor: { type: 'citizen', id: citizenId },
@@ -200,6 +215,24 @@ export class DevicesService {
       context: { reason: revokeReason },
     });
     return { status: 'revoked' };
+  }
+
+  /**
+   * Register/rotate the wake-only push address of ONE binding (05 §5). The
+   * binding id comes from the authenticated device session, never the body.
+   *
+   * Deliberately not audited: registering a notification address is not an
+   * enrolment, authentication, consent, revocation or admin action (06 §7),
+   * and the shared `AUDIT_ACTIONS` vocabulary has no member for it. It is
+   * covered by the request log and the push metrics instead. Its removal on
+   * revocation IS audited, as part of `device.revoked`.
+   */
+  async registerPushToken(bindingId: string, platform: PushPlatform, token: string): Promise<void> {
+    await this.push.registerToken(bindingId, platform, token);
+  }
+
+  async removePushToken(bindingId: string): Promise<void> {
+    await this.push.clearToken(bindingId, 'citizen-removed');
   }
 
   /**

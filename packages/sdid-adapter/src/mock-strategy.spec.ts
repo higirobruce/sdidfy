@@ -14,13 +14,14 @@ afterEach(() => {
 
 describe('MockSdidStrategy', () => {
   it('returns the canonical mock reference bytes for a known NID', async () => {
-    const strategy = new MockSdidStrategy();
+    const pepper = 'dev-only-nid-pepper-change-me';
+    const strategy = new MockSdidStrategy({ nidPepper: pepper });
     const res = await strategy.getReferenceBiometric({ nid: KNOWN, modality: 'face' });
     expect(Buffer.from(res.reference.data)).toEqual(
       Buffer.from(mockBiometricBytes(KNOWN, 'face')),
     );
     expect(res.reference.format).toBe('mock');
-    expect(res.sdidSubject).toBe(sdidSubjectForNid(KNOWN));
+    expect(res.sdidSubject).toBe(sdidSubjectForNid(KNOWN, pepper));
     expect(res.sdidSubject).toMatch(/^sdid-[0-9a-f]{16}$/);
     expect(res.txnRef).toMatch(/^mock-[0-9a-f]{12}$/);
   });
@@ -82,8 +83,9 @@ describe('MockSdidStrategy', () => {
   });
 
   it('reassert accepts the sdidSubject and reports unknown ids invalid (no throw)', async () => {
-    const strategy = new MockSdidStrategy();
-    const bySubject = await strategy.reassert(sdidSubjectForNid(KNOWN));
+    const pepper = 'dev-only-nid-pepper-change-me';
+    const strategy = new MockSdidStrategy({ nidPepper: pepper });
+    const bySubject = await strategy.reassert(sdidSubjectForNid(KNOWN, pepper));
     expect(bySubject).toEqual(expect.objectContaining({ valid: true, assurance: 'AL2' }));
     const unknown = await strategy.reassert(UNKNOWN);
     expect(unknown).toEqual(expect.objectContaining({ valid: false, assurance: 'AL1' }));

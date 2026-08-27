@@ -20,6 +20,19 @@ import { DevicesService, type ActivityItem } from './devices.service.js';
 const revokeConsentRequestSchema = z.object({ consentId: z.string().uuid() });
 type RevokeConsentRequest = z.infer<typeof revokeConsentRequestSchema>;
 
+/**
+ * Push-token registration (05 §5). Validated at the boundary like every other
+ * body: the platform is a closed enum and the token is length-bounded, because
+ * this value is written to a column and later handed verbatim to Google/Apple.
+ * FCM registration tokens run to ~200 chars and APNs device tokens are 64 hex
+ * characters; 4096 is a generous ceiling that still refuses a blob.
+ */
+const registerPushTokenSchema = z.object({
+  platform: z.enum(['fcm', 'apns']),
+  token: z.string().min(1).max(4096),
+});
+type RegisterPushTokenRequest = z.infer<typeof registerPushTokenSchema>;
+
 type AuthedRequest = Request & { deviceSession: DeviceSession };
 
 /**
@@ -79,6 +92,35 @@ export class DevicesController {
   ): Promise<{ status: 'revoked' }> {
     await this.consents.revokeGrant(req.deviceSession.citizenId, body.consentId);
     return { status: 'revoked' };
+  }
+
+  /**
+   * Register or ROTATE this device's wake-only push address (05 §5).
+   *
+   * Authenticated by the device session and scoped to the session's OWN
+   * binding — the body carries no binding id, so one device can never point
+   * another citizen's wake notifications at itself. Rotation is the same call:
+   * FCM/APNs reissue tokens without warning, so the app re-registers whatever
+   * it currently holds and the newest value wins.
+   */
+  @Post('push-token')
+  @HttpCode(200)
+  @UseGuards(DeviceSessionGuard)
+  async registerPushToken(
+    @Body(new ZodPipe(registerPushTokenSchema)) body: RegisterPushTokenRequest,
+    @Req() req: AuthedRequest,
+  ): Promise<{ status: 'registered' }> {
+    await this.devices.registerPushToken(req.deviceSession.bindingId, body.platform, body.token);
+    return { status: 'registered' };
+  }
+
+  /** Remove this device's push address (app logout / notifications disabled). */
+  @Post('push-token/remove')
+  @HttpCode(200)
+  @UseGuards(DeviceSessionGuard)
+  async removePushToken(@Req() req: AuthedRequest): Promise<{ status: 'removed' }> {
+    await this.devices.removePushToken(req.deviceSession.bindingId);
+    return { status: 'removed' };
   }
 
   @Get('activity')
