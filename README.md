@@ -54,7 +54,7 @@ pnpm demo:ghost-login    # the full trust-chain demo (see below)
 pnpm test                # unit + protocol tests across all packages
 ```
 
-To run the broker on its own: `pnpm broker:dev` (listens on `BROKER_PORT`, default 3100). The `device-sim` and `test-rp` CLIs default to `http://localhost:3000`, so point them at the broker with `--broker` / `BROKER_URL`.
+To run the broker on its own: `pnpm broker:dev` (listens on `BROKER_PORT`, default 3100). The `device-sim` and `test-rp` CLIs default to `http://localhost:3100`, matching the broker; override with `--broker` / `BROKER_URL` if you moved it.
 
 ## What the ghost-login demo proves
 

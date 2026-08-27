@@ -10,7 +10,7 @@ Ops notes for the Phases 0–2 build plus the Phase 3 hardening that needed no S
 | PostgreSQL 16 | Primary store + append-only audit + dev signing keys | Dev credentials: `sdid`/`sdid_dev`, database `sdid_bridge` |
 | Redis | Challenges, rate limits, lockouts, token denylist, code-flow stash, anomaly-detector windows | Single logical instance; all state is short-TTL and reconstructible except active lockouts |
 | Prometheus (or equivalent) | Scrapes `GET /metrics` with `METRICS_TOKEN` | §11. Orchestrator probes `GET /healthz` (liveness) and `GET /readyz` (readiness) — §12 |
-| device-sim / test-rp | CLIs (`apps/device-sim`, `apps/test-rp`) | Dev/test only. Both default to `http://localhost:3000` — set `BROKER_URL` (or `--broker`) to the real broker address |
+| device-sim / test-rp | CLIs (`apps/device-sim`, `apps/test-rp`) | Dev/test only. Both default to `http://localhost:3100`, matching `BROKER_PORT` — set `BROKER_URL` (or `--broker`) to reach a broker elsewhere |
 
 Push is wake-only and, today, **undeliverable**: the FCM and APNs transports are fully implemented but no GoR credentials exist, so both are declared seams that throw descriptively and the delivery is recorded as `outcome="not_configured"` (§13). Devices discover pending CIBA requests by polling `GET /v1/device/ciba/pending`, which is why an unconfigured transport degrades wake latency and nothing else.
 
