@@ -5,7 +5,7 @@ import type { Messages } from './types.js';
  * moment `rw.ts` gains a key it does not have.
  */
 export const en: Messages = {
-  'common.appName': 'SDID',
+  'common.appName': 'RwandaPass',
   'common.continue': 'Continue',
   'common.cancel': 'Cancel',
   'common.back': 'Back',

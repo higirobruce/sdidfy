@@ -854,6 +854,7 @@ Cross-cutting: adapter + SDID liaison; DPO/legal liaison for `08` gates.
 | — | **NIDA authorization** | Already in place (Q13) |
 | 8 | **Consent Framework integration** | **Reuse it fully** — our own consent artefact, registry + dashboard + audit (Q16) |
 | — | **Data residency** | In-country / GoR infrastructure (Q17) |
+| 10 | **Naming / branding** | **RwandaPass** — citizen-facing, distinct from the internal `SDID` broker name; wired into `common.appName` (`en`/`fr`/`rw`) |
 
 ## Open — still to resolve
 
@@ -869,7 +870,6 @@ Cross-cutting: adapter + SDID liaison; DPO/legal liaison for `08` gates.
 | 6 | **Fallback when biometric/device unavailable** | in-person re-enrol · assisted desk · OTP-assisted | In-person / assisted-desk; avoid SMS-OTP as primary (SIM-swap). Accessible path for citizens who can't use a modality | Bruce + DPO | Phase 2–3 |
 | 7 | **Offline authentication (v1?)** | no · pre-issued offline challenges | No for v1 | Bruce | Phase 2 |
 | 9 | **Re-verification cadence** | fixed · periodic + AL3 step-up | **Elevated** — also our only revoked/deceased signal (Q12). ~90d + AL3 step-up, balanced vs SDID call cost (A5) | Bruce + SDID team | Phase 1 (defs), Phase 3 (tune) |
-| 10 | **Naming / branding** | placeholder · product name | Pick a citizen-facing name distinct from the internal broker | Bruce | Before Phase 2 UI |
 | 11 | **Revocation propagation window** | seconds · ~300ms eventual (Consent Framework precedent) | Lean aggressive for device/token revocation on national ID | Pacifique | Phase 3 |
 | 12 | **ORM split** | one everywhere · Drizzle for audit/txn + Prisma elsewhere | Match Ikigea, or unify for simplicity | Gervais | Phase 0 |
 

@@ -5,7 +5,7 @@ import type { Messages } from './types.js';
  * against the Kinyarwanda key set.
  */
 export const fr: Messages = {
-  'common.appName': 'SDID',
+  'common.appName': 'RwandaPass',
   'common.continue': 'Continuer',
   'common.cancel': 'Annuler',
   'common.back': 'Retour',

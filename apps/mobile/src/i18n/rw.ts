@@ -22,7 +22,7 @@ export const rw = {
   // ── Common ────────────────────────────────────────────────────────────────
   // NOTE: the citizen-facing product name is still open decision #10; "SDID"
   // is a placeholder carried identically in all three locales.
-  'common.appName': 'SDID',
+  'common.appName': 'RwandaPass',
   'common.continue': 'Komeza',
   'common.cancel': 'Reka',
   'common.back': 'Subira inyuma',
