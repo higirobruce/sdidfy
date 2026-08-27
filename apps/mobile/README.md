@@ -188,9 +188,6 @@ config.resolver.blockList = [/src[\\/]core[\\/]testing[\\/].*/];
 - No push; polling only.
 - `SdidFaceCapture` has no PAD SDK chosen; the liveness score the client sends
   is whatever the native module reports, and nothing here validates it.
-- The iOS App Attest key vs signing key relationship (CONTRACT.md §2.2) is
-  **OPEN** and must be settled with `packages/attestation/src/app-attest.ts`
-  before iOS work starts.
 - Citizen-facing product name is still open decision #10; `common.appName` is a
   placeholder in all three locales.
 - Offline authentication is out of scope for v1 (decision #7); every flow here

@@ -250,10 +250,11 @@ will read `nonce_mismatch` with nothing else to go on. Verified against
 | What | Exact requirement |
 |------|-------------------|
 | Android attestation challenge | The **UTF-8 bytes of the `nonce` string** as returned by `/v1/enrol/attestation-challenge` — not the base64url-*decoded* 32 bytes, and not a re-encoding. Passed to `setAttestationChallenge()` at keypair generation. |
-| iOS `clientDataHash` | `SHA256(utf8(nonce))`. Apple then binds `SHA256(authData ‖ clientDataHash)` into the credCert extension `1.2.840.113635.100.8.2`; the verifier recomputes both. |
+| iOS `clientDataHash` | `SHA256(utf8(nonce) ‖ rawPoint(devicePublicKeyJwk))`, where `rawPoint` is the uncompressed SEC1 point `0x04 ‖ X(32) ‖ Y(32)` of the **enrolled signing key** — not the App Attest key, see the Key identity (iOS) row below. Apple then binds `SHA256(authData ‖ clientDataHash)` into the credCert extension `1.2.840.113635.100.8.2`; the verifier recomputes both. |
 | Android `keyAttestation` container | The X.509 chain, **leaf first**. Accepted as a JSON array of base64 DER strings, a PEM bundle, or a comma/whitespace-separated list of base64 DER. Liberal about the container, strict about the base64 inside it. |
 | iOS `token` | base64 of the CBOR App Attest object (`fmt`/`attStmt`/`authData`) exactly as `DCAppAttestService` returns it. No `keyAttestation` field — on iOS the key attestation *is* the object. |
-| Key identity | The attested key must be the **same** keypair whose public JWK is sent as `devicePublicKeyJwk`. Generating an attestation key separately from the signing key fails `key_mismatch`. |
+| Key identity (Android) | The attested key must be the **same** keypair whose public JWK is sent as `devicePublicKeyJwk`. Generating an attestation key separately from the signing key fails `key_mismatch`. |
+| Key identity (iOS) | Deliberately **not** the same keypair — an App Attest key can't sign an arbitrary payload and can't be biometry-gated, so it is necessarily distinct from the enrolled signing key. The binding runs through `clientData` (row above), not key equality; a mismatch here surfaces as `nonce_mismatch`, indistinguishable by construction from a replayed nonce. |
 
 The nonce is single-use and consumed before verification, so **the app must mint
 a fresh nonce for every enrolment attempt**, including retries after a failure.

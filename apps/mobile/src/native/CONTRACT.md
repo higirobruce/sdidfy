@@ -61,9 +61,11 @@ required:
   exact byte-level contract in `docs/runbook.md` §10; getting it wrong makes
   every enrolment fail with a uniform `attestation_rejected` whose audit row
   says `nonce_mismatch` and nothing more.
-- **Below API 30**: `setUserAuthenticationValidityDurationSeconds(-1)` is the
-  older spelling of "per-operation auth". **OPEN:** minimum supported API level
-  (proposal: 30, which also gives StrongBox on most Rwanda-market devices).
+- **Minimum supported API level: 30** (Android 11, 2020) — settled. It is the
+  first level with `setUserAuthenticationParameters(0, AUTH_BIOMETRIC_STRONG)`
+  used above, and it also gives StrongBox on most Rwanda-market devices in this
+  cohort. `setUserAuthenticationValidityDurationSeconds(-1)`, the older spelling
+  of "per-operation auth" for pre-30 devices, is out of scope under this floor.
 
 Report `securityLevel` from `KeyInfo.getSecurityLevel()`
 (`SECURITY_LEVEL_STRONGBOX` → `strongbox`, `SECURITY_LEVEL_TRUSTED_ENVIRONMENT`
@@ -169,21 +171,34 @@ invalidated by a biometric re-enrolment.
 
 `DCAppAttestService.shared`:
 
-1. `generateKey()` → `keyId`. **OPEN:** whether the App Attest key and the
-   signing key of §1.2 are the same key. They cannot be — App Attest keys are
-   its own — so the broker's "attested key == enrolled key" check must be
-   satisfied by including the enrolled public key in the attested client data.
-   Proposal: `clientDataHash = SHA256(utf8(nonce))` per runbook §10, and the
-   enrolled public JWK carried in the assertion of the *first* subsequent
-   `generateAssertion` call. **This needs to be settled with whoever implements
-   `packages/attestation/src/app-attest.ts`'s verifier before any iOS work
-   starts** — today the runbook states only the `clientDataHash` rule.
-2. `attestKey(keyId, clientDataHash: SHA256(utf8(nonce)))` → CBOR object.
+1. `generateKey()` → `keyId`. The App Attest key and the signing key of §1.2
+   are **not** the same key, and cannot be: an App Attest key is usable only
+   through `generateAssertion()`, can't sign an arbitrary challenge payload
+   (which every login does), and can't be biometry-gated, while 05 §3 / T1
+   require a fresh biometric unlock for every signature.
+
+   The binding to the enrolled signing key travels through `clientData`
+   instead — settled and implemented in
+   `packages/attestation/src/app-attest.ts` (commit `db8fa4d`):
+
+   ```
+   clientData     = utf8(nonce) ‖ rawPoint(devicePublicKeyJwk)
+   clientDataHash = SHA256(clientData)
+   ```
+
+   `rawPoint` is the uncompressed SEC1 point of the **enrolled signing key**
+   from §1.2 — `0x04 ‖ X(32 bytes) ‖ Y(32 bytes)`, the same X/Y coordinates
+   carried in `devicePublicKeyJwk` — **not** the App Attest key.
+2. `attestKey(keyId, clientDataHash)` → CBOR object, using the `clientDataHash`
+   computed above.
 3. Forward it base64-encoded as `token`; no `keyAttestation` field.
 
 Apple binds `SHA256(authData ‖ clientDataHash)` into the credCert extension
 `1.2.840.113635.100.8.2`; the verifier recomputes both, so any deviation in the
-hash input fails.
+hash input — including signing with a key other than the one just enrolled —
+fails. On iOS that failure surfaces as `nonce_mismatch`, not `key_mismatch`:
+the two are indistinguishable by construction here, so check which key was
+actually enrolled before assuming a replayed nonce.
 
 `IOS_ATTESTATION_PRODUCTION=true` on the broker means a development-provisioned
 build will be rejected — expected, and the reason a dev build cannot be used to
@@ -231,9 +246,29 @@ or it is not true at all.
 Requirements:
 
 - Capture with **active liveness / PAD to ISO/IEC 30107 Level 2** (blink,
-  head-turn, or an equivalent challenge–response). **OPEN:** which SDK. Whatever
-  is chosen is on the security path and must be audited (05 §8), and its PAD
-  performance is a pre-prod gate (06 §8, 09 §3).
+  head-turn, or an equivalent challenge–response). **OPEN: which SDK** — this is
+  a vendor/procurement decision, not an engineering one, and nothing in this
+  repo answers it. Whoever decides needs it to satisfy:
+  - **ISO/IEC 30107-3 Level 2** certification (or an equivalent independent PAD
+    evaluation) for the *specific* liveness method used — a vendor's marketing
+    claim of "L2" is not the certification.
+  - **On-device inference**, or if cloud-assisted, a documented data flow that
+    never persists the frame beyond the single match request (03 §2, 07 §1) —
+    the sample must still fit `SdidFaceCapture`'s one-buffer,
+    zero-on-`release()` model above.
+  - **In-country / GoR-approved data residency** if any part of the SDK phones
+    home, matching the broker's own residency posture (`docs/SPEC.md` B2/C2).
+  - **An auditable verdict** — a liveness score plus enough evidence to support
+    the T18 requirement that match outcomes are logged and tunable by score
+    band, never the biometric itself.
+  - **Device coverage** matching the Android API 30 floor (§1.1) and whatever
+    iOS floor is chosen — an SDK that drops the low end of the Rwanda-market
+    device fleet undercuts the inclusion goal in `docs/SPEC.md` 08.
+  - **Supply-chain review** (06 §8) before it ships — this SDK sits directly on
+    the citizen-authentication path.
+
+  Whatever is chosen is on the security path and must be audited (05 §8), and
+  its PAD performance is a pre-prod gate (06 §8, 09 §3).
 - The image bytes exist in **one buffer**, in memory. Never a file, never the
   photo library, never a `NSTemporaryDirectory`/`cacheDir` scratch path, never
   a `UIImage` handed to a library that might cache it.
