@@ -38,12 +38,27 @@ The full specification lives in [`docs/SPEC.md`](docs/SPEC.md).
 
 ## Quickstart
 
-Prerequisites:
+Prerequisites: **Node.js >= 22**, **pnpm** (the repo pins `pnpm@10.33.0`), **PostgreSQL 16**, and **Redis**.
 
-- Node.js >= 22
-- pnpm (repo pins `pnpm@10.33.0`)
-- PostgreSQL 16 with user `sdid` / password `sdid_dev` and database `sdid_bridge`
-- Redis
+A fresh Postgres has no `sdid` role, so create the role and database once — otherwise the
+broker fails at startup with `role "sdid" does not exist` (`FATAL 28000`). The role needs no
+special privileges: the migrations only create tables, functions and triggers, all of which an
+ordinary owner can do.
+
+```bash
+# macOS (Homebrew) — your login is the Postgres admin, so no -U needed
+brew services start postgresql@16 redis
+psql -d postgres -c "CREATE ROLE sdid LOGIN PASSWORD 'sdid_dev';"
+createdb -O sdid sdid_bridge
+
+# Debian/Ubuntu — the admin is the `postgres` system user
+sudo systemctl start postgresql redis
+sudo -u postgres psql -c "CREATE ROLE sdid LOGIN PASSWORD 'sdid_dev';"
+sudo -u postgres createdb -O sdid sdid_bridge
+```
+
+Change the credentials if you like — `DATABASE_URL` in your `.env` is the only thing that has
+to agree with them.
 
 ```bash
 cp .env.example .env
