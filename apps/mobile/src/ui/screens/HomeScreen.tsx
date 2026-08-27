@@ -92,7 +92,7 @@ export function HomeScreen({
               {t.t('home.pendingCount', { count: groups.length })}
             </Text>
             {groups.map((group) => (
-              <Card key={group.primary.authReqId}>
+              <Card key={group.primary.authReqId} style={styles.pendingCard}>
                 <Text style={styles.heading}>{group.primary.rpName}</Text>
                 {group.primary.bindingMessage ? (
                   <Text style={styles.body}>{group.primary.bindingMessage}</Text>
@@ -144,5 +144,6 @@ const styles = StyleSheet.create({
   body: { ...typography.body, color: colors.text },
   muted: { ...typography.small, color: colors.textMuted },
   pending: { gap: spacing.sm },
+  pendingCard: { borderColor: colors.accent },
   actions: { gap: spacing.sm, marginTop: spacing.md },
 });

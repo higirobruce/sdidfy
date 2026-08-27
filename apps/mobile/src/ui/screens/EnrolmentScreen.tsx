@@ -14,11 +14,14 @@
 import React, { useCallback, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { toMobileError, type MobileError } from '../../core/errors.js';
-import { Busy, Button, Card, ErrorBanner, Screen } from '../components.js';
+import { Button, Card, ErrorBanner, HorizonArc, Screen, StepIndicator } from '../components.js';
 import { useApp } from '../context.js';
-import { colors, spacing, typography } from '../theme.js';
+import { colors, radius, spacing, typography } from '../theme.js';
 
 type Step = 'nid' | 'consent' | 'working' | 'done';
+
+/** 0-based index into the 4-step indicator (ID → consent → verify → done). */
+const STEP_INDEX: Record<Step, number> = { nid: 0, consent: 1, working: 2, done: 3 };
 
 export interface EnrolmentScreenProps {
   deviceLabel: string;
@@ -55,10 +58,13 @@ export function EnrolmentScreen({
   if (step === 'working') {
     return (
       <Screen title={t.t('onboarding.welcomeTitle')}>
+        <StepIndicator steps={4} current={STEP_INDEX[step]} />
         {/* The steps are announced in order; the citizen sees that a security
             check, a key, a match and an activation are happening — not a
-            featureless spinner. */}
-        <Busy label={t.t('enrol.progress.attesting')} />
+            featureless spinner. There's no phase-by-phase signal from the
+            enrolment call itself, so the arc animates indeterminately rather
+            than claiming a completion fraction it doesn't have. */}
+        <HorizonArc label={t.t('enrol.progress.attesting')} />
         <Text style={styles.muted}>{t.t('enrol.progress.generatingKey')}</Text>
         <Text style={styles.muted}>{t.t('enrol.progress.matching')}</Text>
         <Text style={styles.muted}>{t.t('enrol.progress.activating')}</Text>
@@ -69,6 +75,8 @@ export function EnrolmentScreen({
   if (step === 'done') {
     return (
       <Screen title={t.t('enrol.done.title')}>
+        <StepIndicator steps={4} current={STEP_INDEX[step]} />
+        <HorizonArc size={96} progress={100} />
         <Text style={styles.body}>{t.t('enrol.done.body')}</Text>
         {assurance ? (
           <Text style={styles.body}>{t.t('enrol.done.assurance', { level: assurance })}</Text>
@@ -81,6 +89,7 @@ export function EnrolmentScreen({
   if (step === 'consent') {
     return (
       <Screen title={t.t('enrol.consent.title')}>
+        <StepIndicator steps={4} current={STEP_INDEX[step]} />
         <Text style={styles.body}>{t.t('enrol.consent.body')}</Text>
         <Card>
           <Text style={styles.body}>{`• ${t.t('enrol.consent.point.match')}`}</Text>
@@ -105,6 +114,7 @@ export function EnrolmentScreen({
 
   return (
     <Screen title={t.t('enrol.nid.title')}>
+      <StepIndicator steps={4} current={STEP_INDEX[step]} />
       <Text style={styles.body}>{t.t('onboarding.welcomeBody')}</Text>
       <View>
         <Text style={styles.label} nativeID="nid-label">
@@ -149,7 +159,7 @@ const styles = StyleSheet.create({
     ...typography.body,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 10,
+    borderRadius: radius.md,
     padding: spacing.md,
     color: colors.text,
     letterSpacing: 2,

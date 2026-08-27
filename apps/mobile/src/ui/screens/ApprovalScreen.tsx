@@ -32,9 +32,9 @@ import type { PendingGroup } from '../../core/pending.js';
 import { isDecidable, secondsRemaining } from '../../core/pending.js';
 import { toMobileError, type MobileError } from '../../core/errors.js';
 import { describeScope } from '../../i18n/index.js';
-import { Button, Card, ErrorBanner, Screen } from '../components.js';
+import { Button, Card, CodeChips, ErrorBanner, Screen } from '../components.js';
 import { useApp } from '../context.js';
-import { colors, spacing, typography } from '../theme.js';
+import { colors, radius, spacing, typography } from '../theme.js';
 
 export interface ApprovalScreenProps {
   group: PendingGroup;
@@ -121,9 +121,9 @@ export function ApprovalScreen({
         <Text style={styles.label}>{t.t('approval.codeLabel')}</Text>
         {txn.bindingMessage ? (
           <>
-            <Text accessibilityLabel={spellOut(txn.bindingMessage)} style={styles.code}>
-              {txn.bindingMessage}
-            </Text>
+            <View accessible accessibilityLabel={spellOut(txn.bindingMessage)}>
+              <CodeChips code={txn.bindingMessage} />
+            </View>
             <Text style={styles.instruction}>{t.t('approval.codeInstruction')}</Text>
           </>
         ) : (
@@ -215,7 +215,6 @@ const styles = StyleSheet.create({
   label: { ...typography.small, color: colors.textMuted },
   rpName: { ...typography.title, color: colors.text },
   codeCard: { alignItems: 'center' },
-  code: { ...typography.code, color: colors.code, textAlign: 'center' },
   instruction: { ...typography.body, color: colors.text },
   scope: { ...typography.body, color: colors.text },
   meta: { ...typography.small, color: colors.textMuted },
@@ -227,12 +226,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.warningSurface,
     borderColor: colors.warning,
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: radius.md,
     padding: spacing.md,
   },
   dangerBanner: {
     backgroundColor: colors.danger,
-    borderRadius: 10,
+    borderRadius: radius.md,
     padding: spacing.md,
   },
   warningText: { ...typography.body, color: colors.warning },

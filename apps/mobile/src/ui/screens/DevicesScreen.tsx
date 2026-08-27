@@ -14,7 +14,7 @@ import type { ConsentListItem } from '../../core/wire.js';
 import type { PersistedBinding } from '../../core/types.js';
 import { describeScope } from '../../i18n/index.js';
 import type { MessageKey } from '../../i18n/types.js';
-import { Button, Card, ErrorBanner, Row, Screen } from '../components.js';
+import { Button, Card, ErrorBanner, Row, Screen, StatusPill, type DeviceStatus } from '../components.js';
 import { useApp } from '../context.js';
 import { formatTime } from './HomeScreen.js';
 import { colors, spacing, typography } from '../theme.js';
@@ -28,6 +28,11 @@ function statusKey(status: DeviceListItem['status']): MessageKey {
     default:
       return 'devices.status.pending';
   }
+}
+
+/** `DeviceListItem['status']` is broker-defined; narrow it to the pill's fixed set. */
+function pillStatus(status: DeviceListItem['status']): DeviceStatus {
+  return status === 'active' || status === 'revoked' ? status : 'pending';
 }
 
 export interface DevicesScreenProps {
@@ -85,16 +90,18 @@ export function DevicesScreen({ onBack, onSelfRevoked }: DevicesScreenProps): Re
         const isSelf = device.bindingId === self?.bindingId;
         return (
           <Card key={device.bindingId}>
-            <Text style={styles.heading}>
-              {isSelf ? `${device.deviceLabel} · ${t.t('devices.thisDevice')}` : device.deviceLabel}
-            </Text>
+            <View style={styles.deviceHeader}>
+              <Text style={styles.heading}>
+                {isSelf ? `${device.deviceLabel} · ${t.t('devices.thisDevice')}` : device.deviceLabel}
+              </Text>
+              <StatusPill status={pillStatus(device.status)} label={t.t(statusKey(device.status))} />
+            </View>
             <Row label={t.t('home.assuranceLabel')} value={device.assuranceLevel} />
             <Row label={t.t('devices.enrolledOn', { date: '' }).trim()} value={formatTime(device.enrolledAt)} />
             <Row
               label={t.t('devices.lastUsed', { date: '' }).trim()}
               value={device.lastUsedAt ? formatTime(device.lastUsedAt) : t.t('devices.neverUsed')}
             />
-            <Text style={styles.muted}>{t.t(statusKey(device.status))}</Text>
 
             {device.status !== 'revoked' ? (
               confirming === device.bindingId ? (
@@ -169,9 +176,15 @@ export function DevicesScreen({ onBack, onSelfRevoked }: DevicesScreenProps): Re
 }
 
 const styles = StyleSheet.create({
-  heading: { ...typography.heading, color: colors.text },
+  heading: { ...typography.heading, color: colors.text, flexShrink: 1 },
   body: { ...typography.body, color: colors.text },
   muted: { ...typography.small, color: colors.textMuted },
+  deviceHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
   confirm: { gap: spacing.sm, marginTop: spacing.sm },
   actions: { marginTop: spacing.md },
 });
