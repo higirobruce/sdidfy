@@ -90,7 +90,10 @@ describe('production configuration guard rails (Phase 3 additions)', () => {
     applyEnv({
       APNS_TEAM_ID: 'TEAMID123',
       APNS_KEY_ID: 'KEYID12345',
-      APNS_PRIVATE_KEY_P8: '-----BEGIN PRIVATE KEY-----',
+      // Placeholder, not a PEM header — APNS_PRIVATE_KEY_P8 is a plain
+      // z.string() with no shape validation, and a literal key header in
+      // source trips repo secret scanners.
+      APNS_PRIVATE_KEY_P8: 'p8-key-material-placeholder',
       APNS_TOPIC: 'rw.gov.risa.sdid',
       APNS_PRODUCTION: 'false',
     });

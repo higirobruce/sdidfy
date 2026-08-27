@@ -42,12 +42,15 @@ describe('redaction — deny-listed field names', () => {
           nonce: 'Zm9vYmFy',
           signature: 'MEUCIQ',
           clientSecret: 's3cret',
-          privateKey: '-----BEGIN EC PRIVATE KEY-----',
+          // A placeholder, not a PEM header: a literal '-----BEGIN … KEY-----'
+          // in source trips repo secret scanners, and redaction keys off the
+          // FIELD NAME, so the value's shape is irrelevant to what this proves.
+          privateKey: 'ec-private-key-placeholder',
         },
       },
     });
     const text = JSON.stringify(out);
-    for (const leaked of ['ey.header.payload', 'Zm9vYmFy', 'MEUCIQ', 's3cret', 'BEGIN EC PRIVATE KEY']) {
+    for (const leaked of ['ey.header.payload', 'Zm9vYmFy', 'MEUCIQ', 's3cret', 'ec-private-key-placeholder']) {
       expect(text).not.toContain(leaked);
     }
     expect(text).not.toContain(NID);

@@ -191,6 +191,12 @@ jobs:
       # and the e2e suite share one Postgres and one Redis (the e2e harness
       # clears `rl:enrol:*` globally, which a broker rate-limit test could be
       # relying on). `pnpm test -- --concurrency=1` serialises them.
+      # `pnpm test` pins turbo to --concurrency=1 on purpose. The broker suite
+      # and the e2e ghost-login suite both drive the SAME Postgres and Redis,
+      # and the broker suite's cleanup deletes citizen/pairwise rows. Run in
+      # parallel, that cleanup can delete the login_hint the e2e suite
+      # provisioned, and bc-authorize then fails mid-run with unknown_user_id.
+      # It passed locally by scheduling luck and failed here — serialise it.
       - name: Test (all packages, including the e2e ghost-login suite)
         run: pnpm test
 
