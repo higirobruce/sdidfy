@@ -17,6 +17,7 @@ import {
   Text,
   View,
   type StyleProp,
+  type TextStyle,
   type ViewStyle,
 } from 'react-native';
 import type { MobileError } from '../core/errors.js';
@@ -305,34 +306,59 @@ export function HorizonArc({ size = 132, progress, label }: HorizonArcProps): Re
   );
 }
 
-export type DeviceStatus = 'active' | 'pending' | 'revoked';
-
 /**
- * Status as shape + label, never colour alone (the same rule the approve/deny
- * buttons follow) — a filled dot, a dashed ring, or a short dash, each paired
- * with its own text.
+ * Three tones, three shapes — shared by every pill in the app so status and
+ * result read the same way wherever they appear: a filled dot (positive), a
+ * dashed ring (neutral), or a short dash (negative), never colour alone.
  */
-export function StatusPill({ status, label }: { status: DeviceStatus; label: string }): React.ReactElement {
-  const pillStyle =
-    status === 'active' ? styles.pillActive : status === 'pending' ? styles.pillPending : styles.pillRevoked;
-  const markStyle =
-    status === 'active'
-      ? styles.pillMarkActive
-      : status === 'pending'
-        ? styles.pillMarkPending
-        : styles.pillMarkRevoked;
-  const textStyle =
-    status === 'active'
-      ? styles.pillTextActive
-      : status === 'pending'
-        ? styles.pillTextPending
-        : styles.pillTextRevoked;
+export type PillTone = 'positive' | 'neutral' | 'negative';
+
+function toneStyles(tone: PillTone): { pill: ViewStyle; mark: ViewStyle; text: TextStyle } {
+  if (tone === 'positive') {
+    return { pill: styles.pillPositive, mark: styles.pillMarkPositive, text: styles.pillTextPositive };
+  }
+  if (tone === 'negative') {
+    return { pill: styles.pillNegative, mark: styles.pillMarkNegative, text: styles.pillTextNegative };
+  }
+  return { pill: styles.pillNeutral, mark: styles.pillMarkNeutral, text: styles.pillTextNeutral };
+}
+
+function Pill({ tone, label }: { tone: PillTone; label: string }): React.ReactElement {
+  const tones = toneStyles(tone);
   return (
-    <View style={[styles.pill, pillStyle]} accessible accessibilityLabel={label}>
-      <View style={[styles.pillMark, markStyle]} />
-      <Text style={[styles.pillText, textStyle]}>{label}</Text>
+    <View style={[styles.pill, tones.pill]} accessible accessibilityLabel={label}>
+      <View style={[styles.pillMark, tones.mark]} />
+      <Text style={[styles.pillText, tones.text]}>{label}</Text>
     </View>
   );
+}
+
+export type DeviceStatus = 'active' | 'pending' | 'revoked';
+
+const DEVICE_STATUS_TONE: Record<DeviceStatus, PillTone> = {
+  active: 'positive',
+  pending: 'neutral',
+  revoked: 'negative',
+};
+
+/** Device status as shape + label, never colour alone (05 §7, the same rule the approve/deny buttons follow). */
+export function StatusPill({ status, label }: { status: DeviceStatus; label: string }): React.ReactElement {
+  return <Pill tone={DEVICE_STATUS_TONE[status]} label={label} />;
+}
+
+export type ActivityResult = 'success' | 'denied' | 'failure';
+
+const ACTIVITY_RESULT_TONE: Record<ActivityResult, PillTone> = {
+  success: 'positive',
+  // A citizen's own "deny" is a considered decision, not a problem — it does
+  // not get the alarm treatment a genuine failure does.
+  denied: 'neutral',
+  failure: 'negative',
+};
+
+/** Activity-log outcome as the same shape+label pill DevicesScreen uses. */
+export function ResultPill({ result, label }: { result: ActivityResult; label: string }): React.ReactElement {
+  return <Pill tone={ACTIVITY_RESULT_TONE[result]} label={label} />;
 }
 
 const styles = StyleSheet.create({
@@ -424,11 +450,11 @@ const styles = StyleSheet.create({
   },
   pillMark: { width: 7, height: 7, borderRadius: 4 },
   pillText: { ...typography.small, fontSize: 12, fontWeight: '700' as const },
-  pillActive: { backgroundColor: colors.accentSurface },
-  pillMarkActive: { backgroundColor: colors.accent },
-  pillTextActive: { color: colors.success },
-  pillPending: { backgroundColor: colors.surface },
-  pillMarkPending: {
+  pillPositive: { backgroundColor: colors.accentSurface },
+  pillMarkPositive: { backgroundColor: colors.accent },
+  pillTextPositive: { color: colors.success },
+  pillNeutral: { backgroundColor: colors.surface },
+  pillMarkNeutral: {
     backgroundColor: 'transparent',
     borderWidth: 1.5,
     borderStyle: 'dashed',
@@ -436,8 +462,8 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
   },
-  pillTextPending: { color: colors.textMuted },
-  pillRevoked: { backgroundColor: colors.surface },
-  pillMarkRevoked: { backgroundColor: colors.danger, width: 7, height: 2, borderRadius: 1 },
-  pillTextRevoked: { color: colors.danger },
+  pillTextNeutral: { color: colors.textMuted },
+  pillNegative: { backgroundColor: colors.surface },
+  pillMarkNegative: { backgroundColor: colors.danger, width: 7, height: 2, borderRadius: 1 },
+  pillTextNegative: { color: colors.danger },
 });

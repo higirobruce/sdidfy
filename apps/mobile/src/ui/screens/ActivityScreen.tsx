@@ -12,7 +12,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { toMobileError, type MobileError } from '../../core/errors.js';
 import type { ActivityItem } from '../../core/wire.js';
 import type { MessageKey } from '../../i18n/types.js';
-import { Button, Card, ErrorBanner, Screen } from '../components.js';
+import { Button, Card, ErrorBanner, ResultPill, Screen, type ActivityResult } from '../components.js';
 import { useApp } from '../context.js';
 import { formatTime } from './HomeScreen.js';
 import { colors, spacing, typography } from '../theme.js';
@@ -52,6 +52,18 @@ export function activityResultKey(result: string): MessageKey {
   }
 }
 
+/** Same three-way funnel as {@link activityResultKey}, for the pill's tone. */
+function activityResult(result: string): ActivityResult {
+  switch (result) {
+    case 'success':
+      return 'success';
+    case 'denied':
+      return 'denied';
+    default:
+      return 'failure';
+  }
+}
+
 export interface ActivityScreenProps {
   onBack: () => void;
 }
@@ -80,10 +92,12 @@ export function ActivityScreen({ onBack }: ActivityScreenProps): React.ReactElem
       {events.length === 0 && !error ? <Text style={styles.muted}>{t.t('activity.empty')}</Text> : null}
       {events.map((event) => (
         <Card key={`${event.ts}-${event.action}-${event.result}`}>
-          <Text style={styles.heading}>{t.t(activityActionKey(event.action))}</Text>
+          <View style={styles.eventHeader}>
+            <Text style={styles.heading}>{t.t(activityActionKey(event.action))}</Text>
+            <ResultPill result={activityResult(event.result)} label={t.t(activityResultKey(event.result))} />
+          </View>
           <Text style={styles.muted}>{formatTime(event.ts)}</Text>
           {event.rpName ? <Text style={styles.body}>{event.rpName}</Text> : null}
-          <Text style={styles.muted}>{t.t(activityResultKey(event.result))}</Text>
         </Card>
       ))}
       <View style={styles.actions}>
@@ -94,8 +108,14 @@ export function ActivityScreen({ onBack }: ActivityScreenProps): React.ReactElem
 }
 
 const styles = StyleSheet.create({
-  heading: { ...typography.heading, color: colors.text },
+  heading: { ...typography.heading, color: colors.text, flexShrink: 1 },
   body: { ...typography.body, color: colors.text },
   muted: { ...typography.small, color: colors.textMuted },
+  eventHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
   actions: { marginTop: spacing.md },
 });
