@@ -19,8 +19,47 @@ const configSchema = z.object({
   REDIS_URL: z.string().default('redis://localhost:6379'),
   SDID_STRATEGY: z.enum(['mock', 'oidc', 'proprietary']).default('mock'),
   NID_PEPPER: z.string().default('dev-only-nid-pepper-change-me'),
-  KEYSTORE_DIR: z.string().default('./data/keys'),
   ATTESTATION_MODE: z.enum(['mock', 'strict']).default('mock'),
+  // --- Signing-key custody (06 §3, 07 §5, T13, decision #5) --------------
+  /**
+   * Which custody boundary signs broker tokens.
+   *
+   * `postgres-dev` keeps the private JWK in the `signing_keys` table and signs
+   * in-process — the only provider that holds key material here, and refused
+   * outright in production (see the guard rail below and
+   * `apps/broker/src/keys/postgres-dev.custody.ts`). `kms` and `hsm` are
+   * declared seams awaiting decision #5, which residency (Q17) has narrowed to
+   * a GoR-approved in-country KMS or an on-prem HSM.
+   *
+   * (`KEYSTORE_DIR` used to live here as a "reserved" knob that nothing read.
+   * It is gone: the dev store is the DB table, and an unused key-path setting
+   * next to a real custody selector is an invitation to misconfigure.)
+   */
+  KEY_CUSTODY: z.enum(['postgres-dev', 'kms', 'hsm']).default('postgres-dev'),
+  /**
+   * How often the per-kid signature tally is flushed to the audit trail as one
+   * `key.usage_summary` row (T13 key-usage audit). NOT one row per token — at
+   * national scale that would swamp an append-only chain whose every append
+   * takes a global advisory lock (07 §4). Rotation and shutdown flush too.
+   */
+  KEY_USAGE_SUMMARY_INTERVAL_SECONDS: z.coerce.number().int().positive().default(300),
+  /** In-country KMS API base URL. See apps/broker/src/keys/kms.custody.ts. */
+  KMS_ENDPOINT: z.string().default(''),
+  /**
+   * Logical key group/ring/alias holding the broker's signing keys — a GROUP,
+   * not one key id: JWKS overlap (06 §3) needs the retired keys too.
+   */
+  KMS_KEY_GROUP: z.string().default(''),
+  /** KMS client credential (path or inline). Sign/GetPublicKey/List only. */
+  KMS_CREDENTIALS: z.string().default(''),
+  /** Absolute path to the vendor's PKCS#11 shared library. */
+  HSM_PKCS11_LIBRARY: z.string().default(''),
+  /** PKCS#11 slot id or token label. */
+  HSM_SLOT: z.string().default(''),
+  /** Label / CKA_ID PREFIX identifying the broker's signing keys. */
+  HSM_KEY_LABEL: z.string().default(''),
+  /** PKCS#11 token PIN. From the platform secret store, never an image file. */
+  HSM_PIN: z.string().default(''),
   // --- Strict-mode attestation (05 §4, 06 T2/T3/T4, decision #4) ---------
   /** Our Android app's package name. Anything else is `app_mismatch`. */
   ANDROID_PACKAGE_NAME: z.string().default(''),
@@ -162,6 +201,7 @@ export function loadConfig(): BrokerConfig {
         throw new Error('Production requires ATTESTATION_MODE=strict');
       }
       assertStrictAttestationConfigured(cached);
+      assertKeyCustodyConfigured(cached);
       assertObservabilityConfigured(cached);
       assertPushConfigured(cached);
     }
@@ -198,6 +238,63 @@ function assertStrictAttestationConfigured(config: BrokerConfig): void {
     throw new Error(
       `Production strict attestation requires real values for: ${missing.join(', ')}`,
     );
+  }
+}
+
+/**
+ * Production guard rails for signing-key custody (06 §3, 07 §5, T13,
+ * decision #5), in the same spirit as the NID_PEPPER / ATTESTATION_MODE rails.
+ *
+ * `postgres-dev` keeps the token-signing private key as plaintext in the
+ * database and imports it into this process. In production that is a
+ * token-forgery key for the national identity service, sitting in every
+ * backup and every DB dump — precisely what T13, 06 §3 and 07 §5 forbid. The
+ * provider's own constructor refuses too (belt and braces for paths that never
+ * reach this function), but failing at config load gives the operator the
+ * message before anything else has started.
+ *
+ * The seams get the half-configured treatment as well: a KMS endpoint with no
+ * credential is a deployment that believes it has custody and has none, and it
+ * would fail on the first citizen's login rather than at boot.
+ */
+function assertKeyCustodyConfigured(config: BrokerConfig): void {
+  if (config.KEY_CUSTODY === 'postgres-dev') {
+    throw new Error(
+      'Production refuses KEY_CUSTODY=postgres-dev: it stores the broker signing key in the ' +
+        'database as plaintext and imports it into app memory, which SPEC 06 §3 (T13) and 07 §5 ' +
+        'forbid. Spec open decision #5 requires a GoR-approved in-country KMS or an on-prem HSM ' +
+        '(residency, Q17). Set KEY_CUSTODY=kms or KEY_CUSTODY=hsm and supply that provider\'s ' +
+        'adapter — see docs/runbook.md §4.',
+    );
+  }
+  if (config.KEY_CUSTODY === 'kms') {
+    const missing = (
+      [
+        ['KMS_ENDPOINT', config.KMS_ENDPOINT],
+        ['KMS_KEY_GROUP', config.KMS_KEY_GROUP],
+        ['KMS_CREDENTIALS', config.KMS_CREDENTIALS],
+      ] as const
+    )
+      .filter(([, value]) => value.trim() === '')
+      .map(([name]) => name);
+    if (missing.length > 0) {
+      throw new Error(`KEY_CUSTODY=kms requires: ${missing.join(', ')}`);
+    }
+  }
+  if (config.KEY_CUSTODY === 'hsm') {
+    const missing = (
+      [
+        ['HSM_PKCS11_LIBRARY', config.HSM_PKCS11_LIBRARY],
+        ['HSM_SLOT', config.HSM_SLOT],
+        ['HSM_KEY_LABEL', config.HSM_KEY_LABEL],
+        ['HSM_PIN', config.HSM_PIN],
+      ] as const
+    )
+      .filter(([, value]) => value.trim() === '')
+      .map(([name]) => name);
+    if (missing.length > 0) {
+      throw new Error(`KEY_CUSTODY=hsm requires: ${missing.join(', ')}`);
+    }
   }
 }
 

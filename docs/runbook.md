@@ -25,7 +25,10 @@ Push is wake-only and, today, **undeliverable**: the FCM and APNs transports are
 | `REDIS_URL` | `redis://localhost:6379` | Redis connection string |
 | `SDID_STRATEGY` | `mock` | `mock` \| `oidc` \| `proprietary` — adapter strategy flag (§7) |
 | `NID_PEPPER` | `dev-only-nid-pepper-change-me` | HMAC key for the pseudonymised NID (Q8). Changing it orphans every existing citizen row — treat as immutable once citizens exist. Prod: KMS-held |
-| `KEYSTORE_DIR` | `./data/keys` | Reserved. The dev key store is actually the `signing_keys` Postgres table (§4); this knob is currently unused |
+| `KEY_CUSTODY` | `postgres-dev` | Which boundary signs tokens: `postgres-dev` \| `kms` \| `hsm` (§4). **Production refuses `postgres-dev`** (§8) |
+| `KEY_USAGE_SUMMARY_INTERVAL_SECONDS` | `300` | How often the per-kid signature tally is flushed to the audit trail as one `key.usage_summary` row (§4, T13) |
+| `KMS_ENDPOINT` / `KMS_KEY_GROUP` / `KMS_CREDENTIALS` | *(empty)* | In-country KMS API base URL, the key GROUP (not one key — overlap needs the retired ones), and the client credential. Only read when `KEY_CUSTODY=kms` (§4) |
+| `HSM_PKCS11_LIBRARY` / `HSM_SLOT` / `HSM_KEY_LABEL` / `HSM_PIN` | *(empty)* | PKCS#11 library path, slot/token, key label PREFIX, and token PIN. Only read when `KEY_CUSTODY=hsm` (§4) |
 | `ATTESTATION_MODE` | `mock` | `mock` accepts the simulator's structured attestation tokens; `strict` runs the real Play Integrity / App Attest verifiers from `@sdid/attestation` (§10) |
 | `ATTESTATION_NONCE_TTL_SECONDS` | `300` | Lifetime of a server-issued attestation nonce (§10). Enforced `<=` the verifiers' max token age (300 s) — the broker refuses to boot in strict mode if it is larger |
 | `ANDROID_PACKAGE_NAME` | *(empty)* | Our Android package name. Strict mode only; empty is a configuration error, not "accept any" |
@@ -73,17 +76,169 @@ CLI-side env (not broker config): `BROKER_URL`, and for `test-rp`: `CLIENT_ID`, 
 
 The JSON logger is constructed **before** Nest, so migration and module-init output is structured and redacted too — the lines you most need during a bad boot are the earliest ones. The correlation middleware is registered before the router, so every line emitted while handling a request (including from the global exception filter) carries the same `requestId` (§12.3).
 
-## 4. Key rotation (spec 06 §3)
+## 4. Signing-key custody and rotation (spec 06 §3, 07 §5, T13, decision #5)
 
-Keys live in the `signing_keys` table: `kid, alg, public_jwk, private_jwk, status ('active'|'retired'), created_at`. The broker signs with the single `active` key and **publishes every row — active and retired — in `/oidc/jwks`**, so tokens signed by a retired key keep verifying (JWKS overlap).
+### 4.1 The custody boundary
 
-Rotation procedure (dev store; the KMS/HSM version keeps the same shape):
+All broker token signing goes through **one interface**, `KeyCustody`
+(`apps/broker/src/keys/key-custody.ts`). It is **sign-as-a-service**: the
+boundary performs the signature and returns only the signature bytes. There is
+deliberately no way to obtain a private key through it — 01 §3 and 06 §3 say
+signing keys must never sit in app memory as plaintext and never leave the
+boundary in plaintext, and an interface with a `getPrivateKey(kid)` on it would
+be unimplementable against a real KMS or HSM while making the codebase *look*
+like T13 was handled.
 
-1. Generate a new ES256 keypair and swap it in **in one transaction**: set the current active row to `status='retired'` and insert the new row with `status='active'`. Exactly one row must be `active` at any time (the broker signs with the first active row it finds).
-2. Restart (or rolling-restart) the broker: keys are loaded at module init, so the new active key takes effect on boot. All replicas must restart before the old key's tokens age out matters — until then both keys are in the published JWKS, so mixed replicas stay verifiable.
-3. **Retired keys stay published** until no token signed by them can still be live: the longest broker-issued lifetime is `SESSION_TTL_SECONDS` (900 s by default). After that window a retired row may be deleted from `signing_keys`, which removes it from the JWKS.
+Consequence worth knowing before you read the code: `jose.SignJWT().sign()`
+needs a local key and cannot call a remote signer, so `KeysService` assembles
+the compact JWS itself (`base64url(header).base64url(payload)` → `custody.sign()`
+→ append the signature). `jose` still does all verification, which needs only
+public keys.
 
-RPs must select verification keys by `kid` and re-fetch the JWKS on an unknown `kid` — the integration guide says so.
+`KEY_CUSTODY` selects the provider:
+
+| `KEY_CUSTODY` | Provider | Status |
+|---|---|---|
+| `postgres-dev` *(default)* | `postgres-dev.custody.ts` | Dev/test/demo only. **Refused in production.** |
+| `kms` | `kms.custody.ts` | Declared seam — needs a deployment-supplied adapter |
+| `hsm` | `hsm-pkcs11.custody.ts` | Declared seam — needs a deployment-supplied adapter |
+
+Whichever provider runs, `/oidc/jwks` publishes **every key, active and
+retired**, so tokens signed before a rotation keep verifying (overlap).
+
+### 4.2 `postgres-dev` — what dev, CI and the demo run
+
+Keys live in the `signing_keys` table: `kid, alg, public_jwk, private_jwk,
+status ('active'|'retired'), created_at`. First boot of an empty database
+generates one ES256 key. The private JWK is imported into the process and
+signed locally with `node:crypto` (`dsaEncoding: 'ieee-p1363'`, which is the
+raw `r||s` JWS form directly).
+
+**This is the only provider that holds key material, and it is a dev-only
+posture.** It refuses to construct under `NODE_ENV=production` — its own
+constructor throws, independently of the config guard rail — because a
+plaintext signing key in the database is a token-forgery key for the national
+identity service, present in every backup and every dump (07 §5).
+
+Rotation, two supported ways:
+
+1. **Programmatic** — `KeysService.rotate()`. One transaction under an advisory
+   lock: the current active row becomes `retired`, a fresh row is inserted
+   `active`. There is never a moment with zero or two active keys. Retired keys
+   stay in the table and therefore in the JWKS.
+2. **By SQL** — set the active row to `status='retired'` and insert the new row
+   `status='active'` **in one transaction**. Exactly one row must be `active`.
+
+No restart is needed either way: `healthCheck()` re-reads `signing_keys` on
+every readiness probe, so a key rotated by another replica or by SQL is picked
+up on the next probe. (The pre-custody implementation loaded keys once at module
+init and *did* need a restart.)
+
+**Retired keys stay published** until no token signed by them can still be live
+— the longest broker-issued lifetime is `SESSION_TTL_SECONDS` (900 s by
+default). After that window a retired row may be deleted from `signing_keys`,
+which removes it from the JWKS. Deleting it sooner invalidates live tokens.
+
+### 4.3 `kms` — GoR-approved in-country KMS
+
+Decision #5 is open and residency (Q17) rules out any foreign cloud KMS, so
+**no vendor client ships**. `createKmsCustody()` returns a boundary that throws
+`KeyCustodyNotConfiguredError` from every operation and reports unhealthy from
+`healthCheck()` — `/readyz` marks the replica not-ready with a reason rather
+than the broker minting anything. It is never reported as "there are no keys".
+
+A deployment supplies:
+
+- `KMS_ENDPOINT`, `KMS_KEY_GROUP` (a group/ring/alias, **not** one key id —
+  overlap needs the retired keys), `KMS_CREDENTIALS`;
+- one `registerKmsAdapterFactory()` call at bootstrap returning a
+  `RemoteCustodyAdapter` with `listKeys` / `getPublicKey` / `sign`, and
+  optionally `rotate` and `health`. Full contract in the header of
+  `apps/broker/src/keys/kms.custody.ts`.
+
+Two things routinely go wrong in a KMS adapter, both called out in that header:
+many KMS sign a **digest** rather than a message (hash inside the adapter), and
+most return **DER-encoded ECDSA** while JWS requires raw `r||s`. The engine
+autodetects and converts DER, but only if the adapter returns the bytes
+unmodified.
+
+Credential scope: `Sign`, `GetPublicKey`, `List` on the signing group and
+nothing else. The broker must not hold export or decrypt on these keys — the
+point of T13 is that a compromised broker can only *borrow* the ability to
+sign, and revoking the credential ends it.
+
+Rotation: if the adapter implements `rotate()`, `KeysService.rotate()` drives
+it. If it does not, `rotate()` **throws** — see §4.5.
+
+### 4.4 `hsm` — on-prem HSM over PKCS#11
+
+Same shape, with `HSM_PKCS11_LIBRARY`, `HSM_SLOT`, `HSM_KEY_LABEL` (a label
+prefix) and `HSM_PIN` (from the platform secret store — a PIN baked into the
+image is a key in the image), plus `registerHsmAdapterFactory()`. PKCS#11 is a
+native C interface, so the FFI binding is chosen with the device and has to
+clear the pre-production security assessment (06 §8); none is bundled.
+
+PKCS#11 specifics — pooled sessions, re-login on
+`CKR_SESSION_HANDLE_INVALID`, `CKM_ECDSA` signing a pre-hashed value, and the
+fact that PKCS#11 returns raw `r||s` (unlike most KMS) — are in the header of
+`apps/broker/src/keys/hsm-pkcs11.custody.ts`.
+
+### 4.5 Rotation that cannot happen programmatically
+
+Most on-prem HSM deployments create keys in a custodian ceremony under dual
+control, not under the broker's credential. An adapter that omits `rotate()`
+makes `KeysService.rotate()` throw `KeyCustodyRotationUnsupportedError`, and
+`custody.capabilities.rotate` reads `false`.
+
+That is deliberate and it is the point of the capability flag: **a scheduled
+rotation job that reports success while rotating nothing is the worst possible
+outcome**, because the alerting says the control is working. Rotate
+out-of-band instead; the broker picks the new active key up on its next
+readiness probe, with no restart.
+
+### 4.6 Key-usage audit and metrics (T13)
+
+T13's control set ends with "key-usage audit". Every signing operation is
+attributable, but **not with one audit row per token** — at national scale that
+would swamp the append-only chain, whose every append takes a global advisory
+lock (07 §4), and would bury the events that actually need finding.
+
+Instead:
+
+- **Immediate rows**, one per event: `key.generated`, `key.promoted`,
+  `key.retired`, `key.rotated`, `key.signing_failed`,
+  `key.custody_health_changed`. `key.signing_failed` is throttled to one row
+  per kid per 60 s (an outage retries constantly); the suppressed count is
+  carried in the next summary.
+- **Periodic summary**: `key.usage_summary`, every
+  `KEY_USAGE_SUMMARY_INTERVAL_SECONDS` (default 300) and additionally on
+  rotation and on shutdown. Context carries, per kid: `signatures`,
+  `probeSignatures` (readiness probes, counted apart so the token tally stays
+  meaningful), `failures`, `suppressedFailureRows`.
+- **Metrics**: `sdid_broker_signing_operations_total{kid,alg}` and
+  `sdid_broker_signing_errors_total{kid,alg}`. Labelled by kid and alg only —
+  a kid is public (it is in the JWKS and in every token header) and the set is
+  tiny; nothing about who was authenticated appears. Kids are shortened to 12
+  characters so a uuid- or ARN-shaped key id clears the registry's
+  identity-shape rules (`signingKeyLabel`).
+
+Our rows record what the broker **asked for**. They are not proof of what the
+backend **did** — only the KMS's or HSM's own signing log can reveal a
+signature the broker never requested. Enable it and reconcile the two; that
+pairing is what makes this control meaningful.
+
+### 4.7 Readiness
+
+`/readyz`'s `signing_key` check runs the whole custody path on every probe:
+`healthCheck()` (reaches the backend), a **real signature**, then verification
+of that signature **against the published JWKS**. The last step catches the
+failure that is easiest to miss and worst to ship — custody signs happily with
+a key whose public half is not the one relying parties will use — so the
+replica fails readiness instead of handing out tokens nobody can verify. The
+probe token is never returned to anyone.
+
+RPs must select verification keys by `kid` and re-fetch the JWKS on an unknown
+`kid` — the integration guide says so.
 
 ## 5. Audit verification
 
@@ -166,7 +321,8 @@ Redis loss is safe but lossy: in-flight challenges and code-flow stashes fail (u
 
 - `NID_PEPPER` does not start with `dev-only`;
 - `ADMIN_API_TOKEN` is not `dev-admin-token`;
-- `ATTESTATION_MODE=strict`.
+- `ATTESTATION_MODE=strict`;
+- `KEY_CUSTODY` is **not** `postgres-dev`, and whichever custody provider is named carries all of its settings (§4).
 
 With `ATTESTATION_MODE=strict` (which production also requires), boot additionally refuses unless **all** of these carry real values — an empty app identifier or trust anchor makes a verdict meaningless rather than permissive:
 
@@ -187,7 +343,7 @@ Phase 3 adds four more production rails (all in `loadConfig()`; see `src/config.
 Additional production notes:
 
 - Strict mode is wired end-to-end but **not deployable yet** — see §10 for exactly what is missing. Existing bindings and RP flows are unaffected by attestation mode.
-- The dev key store keeps private JWKs in Postgres (`signing_keys`) — a dev-only posture; production swaps `KeysService` internals for the GoR KMS/HSM (see `docs/DECISIONS.md` f).
+- The dev key store keeps private JWKs in Postgres (`signing_keys`) — a dev-only posture. Production must name a real custody boundary; §4 says what each one needs, and `PostgresDevKeyCustody`'s constructor refuses to build under `NODE_ENV=production` even on a path that skips `loadConfig()` (see `docs/DECISIONS.md` f and l).
 - Production is additionally gated on DPIA + external pentest (spec 06 §8, 09 §5) — guard rails are necessary, not sufficient.
 
 ## 9. Mock → real SDID cutover (spec 02 §4)
@@ -294,6 +450,8 @@ Prometheus text exposition (`Content-Type: text/plain; version=0.0.4`), **hand-r
 | `sdid_broker_ciba_expiries_total` | counter | `flow` | Requests that expired with no decision |
 | `sdid_broker_tokens_issued_total` | counter | `grant_type` | Token responses minted |
 | `sdid_broker_signature_verification_failures_total` | counter | `context` | Device-signature failures by flow leg (`activation` / `login` / `ciba-decision`) |
+| `sdid_broker_signing_operations_total` | counter | `kid`, `alg` | Signatures produced by the key-custody boundary, readiness probes included (§4.6, T13). `kid` is shortened to 12 chars |
+| `sdid_broker_signing_errors_total` | counter | `kid`, `alg` | Custody signing attempts that FAILED — a token was not minted (§4.6, T13) |
 | `sdid_broker_rate_limit_hits_total`, `sdid_broker_lockout_hits_total` | counter | `scope` | Anti-automation refusals (06 §5) |
 | `sdid_broker_anomaly_detections_total` | counter | `pattern` | Abuse patterns detected (§14) |
 | `sdid_broker_sdid_call_duration_seconds` | histogram | `operation`, `outcome` | SDID adapter latency, as the broker experiences it (retries and backoff included) |
@@ -314,7 +472,7 @@ Prometheus text exposition (`Content-Type: text/plain; version=0.0.4`), **hand-r
 | Endpoint | Auth | Meaning | Codes |
 |----------|------|---------|-------|
 | `GET /healthz` | none | **Is the process alive?** Touches no dependency, so a Postgres blip cannot get every replica killed and restarted — which would turn a recoverable dependency outage into a total one | `200 {"status":"ok"}` |
-| `GET /readyz` | none | **Can this replica serve?** Checks Postgres (`SELECT 1`), Redis (`PING`) and the signing key (**a real ES256 signature**, not a row lookup) | `200 {"status":"ready", …}` / `503 {"status":"not_ready", …}` |
+| `GET /readyz` | none | **Can this replica serve?** Checks Postgres (`SELECT 1`), Redis (`PING`) and the signing key (**custody health + a real ES256 signature + verification against the published JWKS**, not a row lookup — §4.7) | `200 {"status":"ready", …}` / `503 {"status":"not_ready", …}` |
 
 Both are unauthenticated because a kubelet or load-balancer health check cannot hold a credential, and gating a probe behind one turns a config mistake into a crash-loop. What makes that safe is that the bodies carry only `ok` / `fail` per component — no connection strings, no error text, nothing an attacker could not learn by watching the service fail. Failure detail goes to the structured log.
 
@@ -324,7 +482,7 @@ Both are unauthenticated because a kubelet or load-balancer health check cannot 
 
 Orchestrator wiring: liveness → `/healthz`; readiness → `/readyz`. Each check has a 2 s timeout, so a hung dependency reads as "not ready" rather than hanging the probe.
 
-The signing-key probe signs a throwaway token rather than asserting a row exists. Today those coincide; once key custody moves to KMS/HSM (decision #5) they diverge exactly when it matters — an expired credential, a revoked grant, an unreachable HSM — and this probe is what takes the replica out of rotation instead of failing citizens' logins.
+The signing-key probe runs the whole custody path (§4.7): a backend health check, a real signature, and verification of that signature against the JWKS relying parties will use. "The key is present" and "the key is usable" are different facts — an expired KMS credential, a revoked grant, an unreachable HSM, or a key whose public half is not the published one all fail here — and this probe is what takes the replica out of rotation instead of failing citizens' logins or minting tokens nobody can verify.
 
 ### 12.2 Alert-worthy conditions
 
@@ -335,6 +493,7 @@ Suggested starting thresholds. Tune against real traffic in the pilot cohort —
 | Audit append failing | `increase(sdid_broker_audit_append_failures_total[5m]) > 0` | **page** | Audit is not best-effort: a failed append fails the operation it was recording (07 §4). Any non-zero value means the broker is refusing security-relevant work |
 | Not ready | `min_over_time(sdid_broker_readiness[5m]) == 0` for any component | **page** | Postgres/Redis/signing key down on a replica |
 | Signing key unusable | `sdid_broker_readiness{component="signing_key"} == 0` | **page** | No tokens can be minted; distinct from a DB outage in remediation |
+| Custody signing errors | `increase(sdid_broker_signing_errors_total[5m]) > 0` | **page** | The custody boundary refused a signature (§4.6). Expired credential, revoked grant, unreachable HSM — every one of these is an authentication outage in progress |
 | SDID circuit rejecting | `increase(sdid_broker_sdid_circuit_rejections_total[5m]) > 0` | **page** | Enrolment and re-verification are both blocked while it is open |
 | SDID latency | `histogram_quantile(0.95, rate(sdid_broker_sdid_call_duration_seconds_bucket[10m])) > 3` | ticket | Approaching the adapter's 5 s timeout; enrolments will start failing |
 | Attestation verifier unavailable | `rate(sdid_broker_attestation_verdicts_total{outcome="unavailable"}[10m]) > 0.1/s` | **page** | "We could not check" — a platform or credential outage refusing genuine citizens with 503 |

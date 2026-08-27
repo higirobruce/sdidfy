@@ -26,6 +26,13 @@ function productionEnv(): Record<string, string> {
     IOS_ATTESTATION_PRODUCTION: 'true',
     ANOMALY_SOURCE_PEPPER: 'real-anomaly-pepper',
     METRICS_TOKEN: 'real-metrics-token',
+    // Production must name a real custody boundary (06 §3, T13, decision #5).
+    // The dev store is refused outright, so the baseline production env picks
+    // the KMS seam and supplies everything it declares.
+    KEY_CUSTODY: 'kms',
+    KMS_ENDPOINT: 'https://kms.gov.rw',
+    KMS_KEY_GROUP: 'sdid-broker-signing',
+    KMS_CREDENTIALS: '/run/secrets/kms-client',
   };
 }
 
@@ -100,8 +107,54 @@ describe('production configuration guard rails (Phase 3 additions)', () => {
     expect(() => loadConfig()).toThrow(/APNS_PRODUCTION=true/);
   });
 
+  // --- signing-key custody (06 §3, T13, decision #5) -----------------------
+
+  it('refuses the dev key store in production (a plaintext token-forgery key)', () => {
+    applyEnv({ KEY_CUSTODY: 'postgres-dev' });
+    // One call only: loadConfig() memoises the parsed config before running
+    // the rails, so a second call returns it instead of throwing again.
+    expect(() => loadConfig()).toThrow(/KEY_CUSTODY=postgres-dev[\s\S]*decision #5/);
+  });
+
+  it('refuses KEY_CUSTODY=kms with no endpoint, key group or credential', () => {
+    applyEnv({ KMS_ENDPOINT: '', KMS_KEY_GROUP: '', KMS_CREDENTIALS: '' });
+    expect(() => loadConfig()).toThrow(/KEY_CUSTODY=kms requires: KMS_ENDPOINT, KMS_KEY_GROUP, KMS_CREDENTIALS/);
+  });
+
+  it('refuses a half-configured KMS (custody it believes in and does not have)', () => {
+    applyEnv({ KMS_CREDENTIALS: '' });
+    expect(() => loadConfig()).toThrow(/KEY_CUSTODY=kms requires: KMS_CREDENTIALS/);
+  });
+
+  it('accepts a fully-specified HSM custody config', () => {
+    applyEnv({
+      KEY_CUSTODY: 'hsm',
+      HSM_PKCS11_LIBRARY: '/usr/lib/softhsm/libsofthsm2.so',
+      HSM_SLOT: '0',
+      HSM_KEY_LABEL: 'sdid-broker-signing',
+      HSM_PIN: 'pin-from-the-platform-secret-store',
+    });
+    expect(() => loadConfig()).not.toThrow();
+  });
+
+  it('refuses an HSM with no PIN — presence only, and never echoed back', () => {
+    applyEnv({
+      KEY_CUSTODY: 'hsm',
+      HSM_PKCS11_LIBRARY: '/usr/lib/softhsm/libsofthsm2.so',
+      HSM_SLOT: '0',
+      HSM_KEY_LABEL: 'sdid-broker-signing',
+      HSM_PIN: '',
+    });
+    expect(() => loadConfig()).toThrow(/KEY_CUSTODY=hsm requires: HSM_PIN/);
+  });
+
   it('applies none of these rails outside production', () => {
-    applyEnv({ NODE_ENV: 'development', METRICS_TOKEN: 'real-admin-token', FCM_PROJECT_ID: 'x' });
+    applyEnv({
+      NODE_ENV: 'development',
+      METRICS_TOKEN: 'real-admin-token',
+      FCM_PROJECT_ID: 'x',
+      KEY_CUSTODY: 'postgres-dev',
+    });
     expect(() => loadConfig()).not.toThrow();
   });
 });

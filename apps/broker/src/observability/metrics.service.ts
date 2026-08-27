@@ -59,6 +59,10 @@ export class MetricsService {
   private readonly cibaExpiries: Counter;
   private readonly tokensIssued: Counter;
 
+  // --- signing-key custody (06 §3, T13) -----------------------------------
+  private readonly signingOperations: Counter;
+  private readonly signingErrors: Counter;
+
   // --- trust chain (06) ---------------------------------------------------
   private readonly signatureFailures: Counter;
   private readonly rateLimitHits: Counter;
@@ -126,6 +130,32 @@ export class MetricsService {
       'sdid_broker_tokens_issued_total',
       'Token responses minted, by OAuth grant type (04 §4).',
       ['grant_type'],
+    );
+
+    // T13 requires key usage to be attributable. The append-only audit trail
+    // carries the accountable record (a periodic `key.usage_summary`, never a
+    // row per token — see packages/shared/src/audit.ts); these two families
+    // carry the OPERATIONAL view, where per-second rates and alerting live.
+    //
+    // Labels are `kid` and `alg` ONLY. A kid is public by construction — it is
+    // published in /oidc/jwks and written into every token header — so it
+    // carries no citizen information, and the set is tiny (active + the keys
+    // still inside the overlap window). Nothing about who was authenticated,
+    // which RP asked, or what was signed appears here, and must not: a
+    // per-subject signing series would be an authentication log in the
+    // monitoring estate, outside the audit trail's access controls (07 §5).
+    this.signingOperations = r.counter(
+      'sdid_broker_signing_operations_total',
+      'Signatures produced by the key-custody boundary, by key id and algorithm (06 §3, T13). ' +
+        'Includes readiness-probe signatures; the audit summary separates those out.',
+      ['kid', 'alg'],
+    );
+    this.signingErrors = r.counter(
+      'sdid_broker_signing_errors_total',
+      'Custody signing attempts that FAILED, by key id and algorithm. A token was not minted, ' +
+        'so any sustained rate here is an authentication outage — an expired KMS credential, an ' +
+        'unreachable HSM, a revoked grant (06 §3, T13).',
+      ['kid', 'alg'],
     );
 
     this.signatureFailures = r.counter(
@@ -272,6 +302,16 @@ export class MetricsService {
     this.tokensIssued.inc({ grant_type: grantType });
   }
 
+  /** One successful custody signature (06 §3, T13). `kid` is already public. */
+  recordSigningOperation(input: { kid: string; alg: string }): void {
+    this.signingOperations.inc({ kid: signingKeyLabel(input.kid), alg: input.alg });
+  }
+
+  /** One custody signature that failed — i.e. a token that was not minted. */
+  recordSigningError(input: { kid: string; alg: string }): void {
+    this.signingErrors.inc({ kid: signingKeyLabel(input.kid), alg: input.alg });
+  }
+
   recordSignatureFailure(context: SignatureContext): void {
     this.signatureFailures.inc({ context });
   }
@@ -329,6 +369,36 @@ export class MetricsService {
     this.droppedSeries.set(this.registry.droppedSeries());
     return this.registry.render();
   }
+}
+
+/**
+ * Shorten a signing-key id into a label value that always clears the
+ * identity-shape rules in `metrics.registry.ts`.
+ *
+ * A `kid` is not sensitive — it is published in the JWKS — but those rules
+ * reject by SHAPE, not by meaning, and they are right to: a rule that asked
+ * "is this identifying?" would need a human to answer. A KMS key id is very
+ * often a uuid or a long resource path, which is exactly the shape a citizen
+ * identifier has, so a raw kid would be rejected (throwing in test, degrading
+ * to `__rejected__` in production — and a metric that reads `__rejected__` for
+ * every key is a metric that cannot tell two keys apart).
+ *
+ * 12 characters is enough to distinguish the handful of keys that are ever
+ * live at once (the active one plus whatever is still inside the overlap
+ * window), and short enough to sit under every length-based rule. Operators
+ * correlate the full kid through the audit trail and the JWKS.
+ */
+export function signingKeyLabel(kid: string): string {
+  const trimmed = kid.trim();
+  if (trimmed === '') return 'unknown';
+  // Drop any path/ARN/URI structure first so the 12 characters that survive
+  // are the distinguishing tail, not a shared `projects/.../keyRings/...`
+  // prefix — two key versions under one ring must not collapse into one
+  // series. Then fold anything outside the label vocabulary to '-' (a PKCS#11
+  // URI carries '=' and ';', which the registry rejects outright).
+  const tail = trimmed.split(/[/:]/).filter(Boolean).pop() ?? trimmed;
+  const safe = tail.replace(/[^A-Za-z0-9_.+-]/g, '-').slice(0, 12);
+  return safe === '' ? 'unknown' : safe;
 }
 
 /**

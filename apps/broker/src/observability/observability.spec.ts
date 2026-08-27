@@ -58,6 +58,8 @@ describe('/metrics endpoint (09 §2 Phase 3)', () => {
       'sdid_broker_ciba_expiries_total',
       'sdid_broker_tokens_issued_total',
       'sdid_broker_signature_verification_failures_total',
+      'sdid_broker_signing_operations_total',
+      'sdid_broker_signing_errors_total',
       'sdid_broker_rate_limit_hits_total',
       'sdid_broker_lockout_hits_total',
       'sdid_broker_anomaly_detections_total',

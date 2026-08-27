@@ -6,6 +6,7 @@ import {
   UnsafeLabelValueError,
   unsafeLabelReason,
 } from './metrics.registry.js';
+import { signingKeyLabel } from './metrics.service.js';
 
 /**
  * The registry is hand-rolled, so its exposition format is our responsibility:
@@ -128,5 +129,40 @@ describe('metrics registry — identifying label values are refused (privacy)', 
       .filter((l) => l.startsWith('sdid_broker_card_total{'));
     expect(seriesLines).toHaveLength(MAX_SERIES_PER_METRIC);
     expect(r.droppedSeries()).toBe(25);
+  });
+});
+
+/**
+ * `signingKeyLabel` exists because a kid is public but SHAPED like an
+ * identifier (06 §3, T13) — see its doc comment. These tests pin the property
+ * that matters: whatever a KMS calls its keys, the label survives the
+ * registry's identity-shape rules in STRICT mode, which is where a mislabelled
+ * series must fail.
+ */
+describe('signing-key metric labels (T13)', () => {
+  const kids = [
+    'a1b2c3d4e5f60718', // the dev store's 16 hex chars
+    '550e8400-e29b-41d4-a716-446655440000', // a uuid, as many KMS use
+    'projects/gor/locations/rw/keyRings/broker/cryptoKeys/sign/cryptoKeyVersions/7',
+    'arn:aws:kms:rw-central-1:123456789012:key/550e8400-e29b-41d4-a716-446655440000',
+    'pkcs11:token=broker;object=sdid-broker-signing-2026',
+    '',
+  ];
+
+  it('produces a label value every kid shape can carry, in strict mode', () => {
+    const r = new MetricsRegistry(true);
+    const c = r.counter('sdid_broker_signing_label_total', 'Label test.', ['kid', 'alg']);
+    for (const kid of kids) {
+      expect(() => c.inc({ kid: signingKeyLabel(kid), alg: 'ES256' })).not.toThrow();
+      expect(unsafeLabelReason(signingKeyLabel(kid))).toBeNull();
+    }
+  });
+
+  it('keeps the distinguishing tail, so two keys never collapse into one series', () => {
+    const a = signingKeyLabel('projects/gor/keyRings/broker/cryptoKeyVersions/7');
+    const b = signingKeyLabel('projects/gor/keyRings/broker/cryptoKeyVersions/8');
+    expect(a).not.toBe(b);
+    expect(signingKeyLabel('a1b2c3d4e5f60718')).toBe('a1b2c3d4e5f6');
+    expect(signingKeyLabel('')).toBe('unknown');
   });
 });

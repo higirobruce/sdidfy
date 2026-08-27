@@ -128,8 +128,11 @@ fi
 
 # ---------------------------------------------------------------------------
 # 4. PRIVATE key material. A broker signing key in the checkout is a
-#    token-forgery key (SPEC 06 §3, T13). KEYSTORE_DIR defaults to ./data/keys
-#    and .gitignore covers it, but that only helps if nobody force-adds.
+#    token-forgery key (SPEC 06 §3, T13). No environment writes key material to
+#    the filesystem any more — dev keys live in the signing_keys table and
+#    production custody is a KMS/HSM (decision #5) — but a key can still be
+#    dropped into a checkout by hand, and .gitignore only helps if nobody
+#    force-adds.
 #
 #    Deliberately narrow: check 1 already catches anything with a PEM
 #    `-----BEGIN … PRIVATE KEY-----` header, so this only adds the formats that

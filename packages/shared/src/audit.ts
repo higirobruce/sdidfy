@@ -27,6 +27,32 @@ export const AUDIT_ACTIONS = [
   'rp.suspended',
   'sdid.reference_fetched',
   'sdid.reassert',
+  // --- Broker signing-key custody (06 §3, T13, decision #5) --------------
+  // T13's control set is "KMS/HSM custody, no plaintext keys in app memory,
+  // rotation w/ /jwks overlap, key-usage audit". The last of those needs its
+  // own vocabulary: every key lifecycle event is security-relevant and must be
+  // attributable, and folding them into `admin.action` (as anomaly detection
+  // had to) would make them unqueryable next to the rest of the trail.
+  //
+  // The split is deliberate. Lifecycle and failure events get an IMMEDIATE row
+  // each — they are rare and each one matters. Signing itself does NOT: at
+  // national scale one row per minted token would swamp the append-only chain
+  // (every append takes a global advisory lock, 07 §4), so signature volume is
+  // counted per kid in memory and flushed as a periodic `key.usage_summary`.
+  /** A new signing keypair came into existence inside the custody boundary. */
+  'key.generated',
+  /** A key became the one the broker signs with. */
+  'key.promoted',
+  /** A key stopped signing but stays in the JWKS for overlap (06 §3). */
+  'key.retired',
+  /** A promote-and-retire cycle completed (the umbrella event for the pair). */
+  'key.rotated',
+  /** A custody `sign()` call failed — a token was NOT minted. Throttled. */
+  'key.signing_failed',
+  /** Periodic per-kid signature tally. NOT one row per token — see above. */
+  'key.usage_summary',
+  /** The custody boundary changed between healthy and unhealthy. */
+  'key.custody_health_changed',
   'admin.action',
 ] as const;
 

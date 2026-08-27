@@ -7,7 +7,7 @@
     "REDIS_URL",
     "NID_PEPPER",
     "ADMIN_API_TOKEN",
-    "KEYSTORE_DIR",
+    "KEY_CUSTODY",
     "SDID_STRATEGY",
     "ATTESTATION_MODE",
     "BROKER_PORT",
