@@ -16,7 +16,7 @@ speaks it byte-for-byte, minus the simulator's attack affordances.
 |------|--------|
 | `src/core/**` — protocol client, keystore/biometric/attestation interfaces, error mapping, T7 pending logic | **Real and tested.** Plain TypeScript, zero React Native imports, 96 vitest tests |
 | `src/i18n/**` — rw (default) / en / fr | **Real and tested.** Completeness, placeholder parity and fallback order are enforced by tests |
-| `src/native/contract.ts` + `CONTRACT.md` | **Specification only.** TypeScript declarations typecheck; **no Swift and no Kotlin exists anywhere in this repo** |
+| `src/native/contract.ts` + `CONTRACT.md` | **Mostly specification only.** `SdidKeyStore` (§1) has a first Kotlin/Swift pass in `src/native/android/` and `src/native/ios/` — written, **never compiled or linked into a real project**, see those directories' READMEs. Its DER→raw `r‖s` signature conversion (§1.4) — the one piece that's pure logic, not platform API — is verified by an independent TypeScript port in `src/native/der-signature.spec.ts` against 2000+ real ECDSA signatures. `SdidAttestation`/`SdidBiometrics`/`SdidFaceCapture` (§2–§4) remain specification only |
 | `src/native/*.rn.ts` | Written, **never compiled** — `react-native` is not installed here |
 | `src/ui/**` | Written, **never rendered** — no Metro, no simulator, no device |
 | Push (FCM/APNs) | **Not implemented here.** The app polls `GET /v1/device/ciba/pending`. As of the runbook this repo was built against, broker-side push was wake-only *and log-only* (runbook §1); if a device-token registration endpoint has since landed on the broker, add the registration call to `ProtocolClient` and keep the pull — the payload stays untrusted either way (T6) |
@@ -52,6 +52,8 @@ src/core/      pure TypeScript — runs and is tested under vitest
   testing/         ⚠ DEV/TEST ONLY doubles — must be excluded from release bundles
 src/i18n/      rw (source of truth) / en / fr + a ~60-line type-safe lookup
 src/native/    contract.ts (typechecked) · CONTRACT.md (Swift/Kotlin spec) · *.rn.ts glue
+  android/         SdidKeyStore Kotlin — written, never compiled, not in a Gradle project yet
+  ios/             SdidKeyStore Swift/Obj-C — written, never compiled, not in an Xcode project yet
 src/ui/        React Native screens
 docs/          rn-dependencies.md — the RN packages needed, none installed
 ```
@@ -78,7 +80,7 @@ tests below could actually be run and verified. It is gitignored; a real
 ## Commands
 
 ```bash
-pnpm --filter @sdid/mobile test        # vitest — 96 tests
+pnpm --filter @sdid/mobile test        # vitest — 99 tests
 pnpm --filter @sdid/mobile typecheck   # tsc over src/core, src/i18n, src/native/contract.ts
 pnpm --filter @sdid/mobile build       # same scope, emits dist/
 ```
@@ -128,8 +130,13 @@ config.resolver.blockList = [/src[\\/]core[\\/]testing[\\/].*/];
 2. **Write the four native modules** — `src/native/CONTRACT.md` §1–§4. This is
    the real work: Secure Enclave / StrongBox key generation with per-operation
    biometric auth, Play Integrity + App Attest, biometric capability checks, and
-   a PAD-capable face capture. Budget for the DER → raw `r||s` signature
-   conversion (§1.4) and the liveness SDK selection (§4, still **OPEN**).
+   a PAD-capable face capture. `SdidKeyStore` (§1) has a first pass in
+   `src/native/android/` and `src/native/ios/` — drop it into the generated
+   project per those directories' READMEs, then unit-test the DER → raw `r||s`
+   conversion (§1.4) against known vectors before trusting anything else in
+   it. `SdidAttestation`, `SdidBiometrics` and `SdidFaceCapture` (§2–§4) still
+   need writing from scratch; budget for the liveness SDK selection (§4, still
+   **OPEN**).
 3. **Wire certificate pinning** — CONTRACT.md §5, then pass a pinned transport
    into `createApp()`; `assertPinnedTransport` refuses an unpinned one in
    release.
@@ -188,7 +195,5 @@ config.resolver.blockList = [/src[\\/]core[\\/]testing[\\/].*/];
 - No push; polling only.
 - `SdidFaceCapture` has no PAD SDK chosen; the liveness score the client sends
   is whatever the native module reports, and nothing here validates it.
-- Citizen-facing product name is still open decision #10; `common.appName` is a
-  placeholder in all three locales.
 - Offline authentication is out of scope for v1 (decision #7); every flow here
   requires the broker.

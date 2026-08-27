@@ -1,11 +1,27 @@
 # Native module contract — what a mobile engineer must implement
 
-> **Status: SPECIFICATION ONLY. No Swift or Kotlin exists in this repository.**
+> **Status: mostly specification only.** `SdidKeyStore` (§1) now has a first
+> Kotlin/Swift implementation — [`android/`](./android/), [`ios/`](./ios/) —
+> written against this contract but **never compiled, linked, or run on
+> hardware**; see those directories' READMEs for exactly what's missing
+> before that's true, including two spots where implementing it surfaced a
+> gap in this document (§1.1's `KeyInfo.getSecurityLevel()` API-level
+> assumption, §1.3's `LAContext` API). `SdidAttestation` (§2), `SdidBiometrics`
+> (§3) and `SdidFaceCapture` (§4) remain specification only — no Swift or
+> Kotlin for those exists anywhere in this repository.
 >
 > Everything below describes native code that must be written, compiled and
-> tested on real hardware. It has never been built or run. It is written as a
-> contract precisely so that the TypeScript above it (`src/core`, which *is*
-> tested) can be reviewed and trusted independently of the native work.
+> tested on real hardware. It is written as a contract precisely so that the
+> TypeScript above it (`src/core`, which *is* tested) can be reviewed and
+> trusted independently of the native work.
+>
+> The one piece of §1 that's pure logic rather than a platform API — the
+> DER→raw `r‖s` signature conversion (§1.4) — is verified against 2000+ real
+> ECDSA signatures via an independent TypeScript port,
+> [`der-signature.spec.ts`](./der-signature.spec.ts), which actually runs
+> under `pnpm --filter @sdid/mobile test`. That does not mean the Kotlin or
+> Swift transcription of it is correct — only that the algorithm they're
+> both transcribing is.
 >
 > Where a decision is genuinely open, it is marked **OPEN** rather than guessed.
 
@@ -72,6 +88,13 @@ Report `securityLevel` from `KeyInfo.getSecurityLevel()`
 → `tee`, anything else → `software`). Report honestly: the TS layer refuses to
 enrol a `software` key by default, and that refusal is the control.
 
+**Found while implementing this, not obvious from the API docs alone:**
+`KeyInfo.getSecurityLevel()` needs **API 31**, one level above the floor this
+section settles on (30). On exactly API 30, fall back to the older
+`KeyInfo.isInsideSecureHardware` — it can't distinguish StrongBox from TEE, so
+report the conservative `tee` rather than guessing `strongbox` when it's true,
+and `software` when it's false.
+
 Return the attestation chain as a JSON array of base64 DER certificates,
 **leaf first** (runbook §10 — the broker also accepts a PEM bundle or a
 comma/whitespace-separated list, but pick one and stay with it).
@@ -113,10 +136,24 @@ Both platforms must raise the prompt as part of the key operation:
   `initSign(privateKey)`-ed. The signature object handed back in
   `onAuthenticationSucceeded` is the *only* one authorised — sign with that
   instance, never re-init afterwards.
-- **iOS**: pass an `LAContext` with `localizedReason` via
-  `kSecUseAuthenticationContext`, and let `SecKeyCreateSignature` trigger the
-  evaluation. Do **not** call `LAContext.evaluatePolicy` separately and then
-  sign; and never set `touchIDAuthenticationAllowableReuseDuration`.
+- **iOS**: pass an `LAContext` via `kSecUseAuthenticationContext`, and let
+  `SecKeyCreateSignature` trigger the evaluation. Do **not** call
+  `LAContext.evaluatePolicy` separately and then sign; and never set
+  `touchIDAuthenticationAllowableReuseDuration`.
+
+  **Correction found while implementing this, not obvious from the API docs
+  alone:** `LAContext` has no settable `localizedReason` property — that
+  string only exists as a parameter to `evaluatePolicy(_:localizedReason:reply:)`,
+  which this method must not call (see above). The prompt's reason text for
+  an *implicit*, `SecKeyCreateSignature`-triggered evaluation instead comes
+  from `kSecUseOperationPrompt`, bound — together with
+  `kSecUseAuthenticationContext`, for the cancel-button title — to the
+  `SecItemCopyMatching` query that fetches the key reference, not to the
+  signing call itself. `SecKeyCreateSignature` on the returned reference then
+  carries that binding into the evaluation. This is documented Apple
+  behaviour, but has not been exercised against Face ID/Touch ID on real
+  hardware — verify the actual prompt text and cancel behaviour before
+  trusting this.
 
 There is deliberately **no `unlock()` method** on the interface. A separate
 "authenticate, then sign" API is a time-of-check/time-of-use hole: malware that
