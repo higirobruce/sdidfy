@@ -32,6 +32,8 @@ modules in the repo, not as third-party packages.
 | `expo` | `~5x` | Dev client + config plugins (if the Expo route is taken) |
 | `expo-dev-client` | latest | Custom native code with the Expo workflow |
 | `expo-localization` | latest | BCP-47 device locale → `resolveLocale()` |
+| `react-native-safe-area-context` | latest | `SafeAreaProvider`/`SafeAreaView` in `App.tsx`. RN's own core `SafeAreaView` is iOS-only and unreliable even there — content spills into the status bar / notch on Android (and inconsistently on iOS) without this |
+| `expo-font` + `@expo-google-fonts/plus-jakarta-sans` | latest | `theme.ts`'s `fonts.regular`/`semiBold`/`bold` — every text role in the app, not just titles. Loaded via `useFonts` at the app's entry point (not inside `App.tsx`/`theme.ts`, which stay agnostic about how a family name gets registered). Until something calls `useFonts` with all three weights, those family names silently fall back to the system font — nothing breaks, text just renders in the OS default until then |
 | `react-native-mmkv` **or** `expo-secure-store` | latest | `BindingStore` implementation. Prefer `expo-secure-store` (Keychain / EncryptedSharedPreferences); it is identity-linked data (see below) |
 | `@react-native-firebase/messaging` **or** `expo-notifications` | latest | FCM/APNs **wake-only** (05 §5, T6) |
 

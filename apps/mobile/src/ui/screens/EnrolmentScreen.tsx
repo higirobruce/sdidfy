@@ -14,7 +14,7 @@
 import React, { useCallback, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { toMobileError, type MobileError } from '../../core/errors.js';
-import { Button, Card, ErrorBanner, HorizonArc, Screen, StepIndicator } from '../components.js';
+import { BulletPoint, Button, Card, ErrorBanner, HorizonArc, StepScreen } from '../components.js';
 import { useApp } from '../context.js';
 import { colors, radius, spacing, typography } from '../theme.js';
 
@@ -57,8 +57,7 @@ export function EnrolmentScreen({
 
   if (step === 'working') {
     return (
-      <Screen title={t.t('onboarding.welcomeTitle')}>
-        <StepIndicator steps={4} current={STEP_INDEX[step]} />
+      <StepScreen title={t.t('onboarding.welcomeTitle')} steps={4} currentStep={STEP_INDEX[step]}>
         {/* The steps are announced in order; the citizen sees that a security
             check, a key, a match and an activation are happening — not a
             featureless spinner. There's no phase-by-phase signal from the
@@ -68,53 +67,67 @@ export function EnrolmentScreen({
         <Text style={styles.muted}>{t.t('enrol.progress.generatingKey')}</Text>
         <Text style={styles.muted}>{t.t('enrol.progress.matching')}</Text>
         <Text style={styles.muted}>{t.t('enrol.progress.activating')}</Text>
-      </Screen>
+      </StepScreen>
     );
   }
 
   if (step === 'done') {
     return (
-      <Screen title={t.t('enrol.done.title')}>
-        <StepIndicator steps={4} current={STEP_INDEX[step]} />
+      <StepScreen
+        title={t.t('enrol.done.title')}
+        steps={4}
+        currentStep={STEP_INDEX[step]}
+        footer={<Button label={t.t('common.continue')} onPress={onEnrolled} />}
+      >
         <HorizonArc size={96} progress={100} />
         <Text style={styles.body}>{t.t('enrol.done.body')}</Text>
         {assurance ? (
           <Text style={styles.body}>{t.t('enrol.done.assurance', { level: assurance })}</Text>
         ) : null}
-        <Button label={t.t('common.continue')} onPress={onEnrolled} />
-      </Screen>
+      </StepScreen>
     );
   }
 
   if (step === 'consent') {
     return (
-      <Screen title={t.t('enrol.consent.title')}>
-        <StepIndicator steps={4} current={STEP_INDEX[step]} />
+      <StepScreen
+        title={t.t('enrol.consent.title')}
+        steps={4}
+        currentStep={STEP_INDEX[step]}
+        footer={
+          <>
+            <ErrorBanner error={error} onRetry={() => void run()} />
+            <Button label={t.t('enrol.consent.agree')} onPress={() => void run()} />
+            <Button
+              label={t.t('enrol.consent.decline')}
+              variant="secondary"
+              onPress={() => setStep('nid')}
+            />
+          </>
+        }
+      >
         <Text style={styles.body}>{t.t('enrol.consent.body')}</Text>
-        <Card>
-          <Text style={styles.body}>{`• ${t.t('enrol.consent.point.match')}`}</Text>
-          <Text style={styles.body}>{`• ${t.t('enrol.consent.point.noStore')}`}</Text>
-          <Text style={styles.body}>{`• ${t.t('enrol.consent.point.deviceKey')}`}</Text>
-          <Text style={styles.body}>{`• ${t.t('enrol.consent.point.revoke')}`}</Text>
+        <Card style={styles.consentCard}>
+          <BulletPoint text={t.t('enrol.consent.point.match')} />
+          <BulletPoint text={t.t('enrol.consent.point.noStore')} />
+          <BulletPoint text={t.t('enrol.consent.point.deviceKey')} />
+          <BulletPoint text={t.t('enrol.consent.point.revoke')} />
         </Card>
         <Text style={styles.body}>{t.t('enrol.capture.instruction')}</Text>
         <Text style={styles.muted}>{t.t('enrol.capture.liveness')}</Text>
-        <ErrorBanner error={error} onRetry={() => void run()} />
-        <View style={styles.actions}>
-          <Button label={t.t('enrol.consent.agree')} onPress={() => void run()} />
-          <Button
-            label={t.t('enrol.consent.decline')}
-            variant="secondary"
-            onPress={() => setStep('nid')}
-          />
-        </View>
-      </Screen>
+      </StepScreen>
     );
   }
 
   return (
-    <Screen title={t.t('enrol.nid.title')}>
-      <StepIndicator steps={4} current={STEP_INDEX[step]} />
+    <StepScreen
+      title={t.t('enrol.nid.title')}
+      steps={4}
+      currentStep={STEP_INDEX[step]}
+      footer={
+        <Button label={t.t('common.continue')} disabled={!nidValid} onPress={() => setStep('consent')} />
+      }
+    >
       <Text style={styles.body}>{t.t('onboarding.welcomeBody')}</Text>
       <View>
         <Text style={styles.label} nativeID="nid-label">
@@ -141,12 +154,7 @@ export function EnrolmentScreen({
           </Text>
         ) : null}
       </View>
-      <Button
-        label={t.t('common.continue')}
-        disabled={!nidValid}
-        onPress={() => setStep('consent')}
-      />
-    </Screen>
+    </StepScreen>
   );
 }
 
@@ -157,12 +165,11 @@ const styles = StyleSheet.create({
   invalid: { ...typography.small, color: colors.danger, marginTop: spacing.xs },
   input: {
     ...typography.body,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
     padding: spacing.md,
     color: colors.text,
     letterSpacing: 2,
   },
-  actions: { gap: spacing.sm },
+  consentCard: { gap: spacing.sm },
 });

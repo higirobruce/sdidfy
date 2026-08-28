@@ -14,7 +14,16 @@ import type { ConsentListItem } from '../../core/wire.js';
 import type { PersistedBinding } from '../../core/types.js';
 import { describeScope } from '../../i18n/index.js';
 import type { MessageKey } from '../../i18n/types.js';
-import { Button, Card, ErrorBanner, Row, Screen, StatusPill, type DeviceStatus } from '../components.js';
+import {
+  BulletPoint,
+  Button,
+  Card,
+  ErrorBanner,
+  Row,
+  Screen,
+  StatusPill,
+  type DeviceStatus,
+} from '../components.js';
 import { useApp } from '../context.js';
 import { formatTime } from './HomeScreen.js';
 import { colors, spacing, typography } from '../theme.js';
@@ -146,7 +155,7 @@ export function DevicesScreen({ onBack, onSelfRevoked }: DevicesScreenProps): Re
         <Card key={consent.id}>
           <Text style={styles.heading}>{consent.rpName}</Text>
           {consent.scopes.map((scope) => (
-            <Text key={scope} style={styles.body}>{`• ${describeScope(t, scope)}`}</Text>
+            <BulletPoint key={scope} text={describeScope(t, scope)} />
           ))}
           <Text style={styles.muted}>
             {t.t('consents.grantedOn', { date: formatTime(consent.grantedAt) })}

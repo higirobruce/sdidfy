@@ -9,3 +9,7 @@ coverage/
 data/keys/
 # Redis snapshot, written into cwd when redis-server is started from the repo root.
 dump.rdb
+
+# Local-only Expo Go preview (mock-backed UI/flow smoke test) — not a
+# workspace member, never committed. See mobile-preview/README.md.
+/mobile-preview/

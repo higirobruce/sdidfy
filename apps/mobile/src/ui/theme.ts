@@ -24,6 +24,8 @@ export const colors = {
   textMuted: '#55636B',
   primary: '#0B5A82',
   primaryText: '#FFFFFF',
+  /** Light tint of `primary` — a selected-but-not-a-submit-action state (SelectableCard), distinct from the accent's decorative-only role below. */
+  primarySurface: '#E4EEF3',
   accent: '#3F8F6E',
   accentSurface: '#E3F1EA',
   danger: '#A31515',
@@ -40,17 +42,37 @@ export const spacing = { xs: 4, sm: 8, md: 16, lg: 24, xl: 32 } as const;
 export const radius = { sm: 8, md: 12, lg: 16, pill: 999 } as const;
 
 /**
+ * Plus Jakarta Sans, across every text role — not just titles. Three weights
+ * cover the whole app; nothing here falls back to the OS system font anymore.
+ *
+ * These family names only resolve once something in the app has loaded them
+ * via `expo-font`'s `useFonts` (see the app entry point, not this file) — an
+ * unloaded family name falls back to the system font silently, so nothing
+ * here breaks before that wiring exists.
+ *
+ * Never combine one of these with `fontWeight` — the named family already
+ * bakes in its weight, and pairing both makes the OS fake-bold/fake-lighten a
+ * face that doesn't have that variant. Reach for `fonts.semiBold`/`fonts.bold`
+ * directly instead of `{ fontWeight: '600' }` on top of a regular family.
+ */
+export const fonts = {
+  regular: 'PlusJakartaSans_400Regular',
+  semiBold: 'PlusJakartaSans_600SemiBold',
+  bold: 'PlusJakartaSans_700Bold',
+} as const;
+
+/**
  * Base sizes. Every Text in the app must allow the OS large-text setting to
  * scale these (RN honours `allowFontScaling` by default — do not disable it).
  */
 export const typography = {
-  display: { fontSize: 28, fontWeight: '800' as const, lineHeight: 34, letterSpacing: -0.3 },
-  title: { fontSize: 24, fontWeight: '700' as const, lineHeight: 32 },
-  heading: { fontSize: 19, fontWeight: '600' as const, lineHeight: 26 },
-  body: { fontSize: 17, lineHeight: 25 },
-  small: { fontSize: 15, lineHeight: 22 },
-  /** The binding-message code: deliberately huge and monospaced (T7). */
-  code: { fontSize: 34, fontWeight: '700' as const, letterSpacing: 3 },
+  display: { fontFamily: fonts.bold, fontSize: 30, lineHeight: 36, letterSpacing: -0.2 },
+  title: { fontFamily: fonts.semiBold, fontSize: 25, lineHeight: 32 },
+  heading: { fontFamily: fonts.semiBold, fontSize: 19, lineHeight: 26 },
+  body: { fontFamily: fonts.regular, fontSize: 17, lineHeight: 25 },
+  small: { fontFamily: fonts.regular, fontSize: 15, lineHeight: 22 },
+  /** The binding-message code: deliberately huge (T7). */
+  code: { fontFamily: fonts.bold, fontSize: 36, letterSpacing: 3 },
 } as const;
 
 /** Minimum touch target, both platforms' accessibility guidance. */

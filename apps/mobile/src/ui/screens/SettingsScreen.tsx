@@ -8,9 +8,9 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { LOCALE_NAMES, LOCALES, type Locale } from '../../i18n/index.js';
-import { Button, Card, Screen } from '../components.js';
+import { Button, Card, HorizonArc, Screen, SelectableCard } from '../components.js';
 import { useApp } from '../context.js';
-import { colors, spacing, typography } from '../theme.js';
+import { colors, fonts, spacing, typography } from '../theme.js';
 
 export interface SettingsScreenProps {
   appVersion: string;
@@ -31,15 +31,16 @@ export function SettingsScreen({
         <Text accessibilityRole="header" style={styles.heading}>
           {t.t('settings.language')}
         </Text>
-        {LOCALES.map((code: Locale) => (
-          <Button
-            key={code}
-            label={LOCALE_NAMES[code]}
-            variant={code === locale ? 'primary' : 'secondary'}
-            accessibilityHint={code === locale ? t.t('common.done') : undefined}
-            onPress={() => setLocale(code)}
-          />
-        ))}
+        <View style={styles.choices}>
+          {LOCALES.map((code: Locale) => (
+            <SelectableCard
+              key={code}
+              label={LOCALE_NAMES[code]}
+              selected={code === locale}
+              onPress={() => setLocale(code)}
+            />
+          ))}
+        </View>
       </Card>
 
       <Card>
@@ -60,7 +61,12 @@ export function SettingsScreen({
   );
 }
 
-/** The very first screen on a fresh install. */
+/**
+ * The very first screen on a fresh install — the one moment every citizen
+ * sees before anything else, so it gets its own layout rather than the
+ * generic list-screen `Screen` wrapper: a mark, a headline, the choice
+ * itself, and a single unmistakable action pinned to the bottom.
+ */
 export function LanguageScreen({
   onChosen,
 }: {
@@ -68,17 +74,30 @@ export function LanguageScreen({
 }): React.ReactElement {
   const { t, locale, setLocale } = useApp();
   return (
-    <Screen title={t.t('language.title')}>
-      {LOCALES.map((code: Locale) => (
-        <Button
-          key={code}
-          label={LOCALE_NAMES[code]}
-          variant={code === locale ? 'primary' : 'secondary'}
-          onPress={() => setLocale(code)}
-        />
-      ))}
+    <View style={languageStyles.root}>
+      <View style={languageStyles.header}>
+        <HorizonArc size={64} progress={70} />
+        <Text style={languageStyles.eyebrow}>{t.t('common.appName')}</Text>
+        <Text accessibilityRole="header" style={languageStyles.title}>
+          {t.t('language.title')}
+        </Text>
+      </View>
+
+      <View style={languageStyles.choices}>
+        {LOCALES.map((code: Locale) => (
+          <SelectableCard
+            key={code}
+            label={LOCALE_NAMES[code]}
+            selected={code === locale}
+            onPress={() => setLocale(code)}
+          />
+        ))}
+      </View>
+
+      <View style={languageStyles.spacer} />
+
       <Button label={t.t('common.continue')} onPress={onChosen} />
-    </Screen>
+    </View>
   );
 }
 
@@ -86,5 +105,22 @@ const styles = StyleSheet.create({
   heading: { ...typography.heading, color: colors.text },
   body: { ...typography.body, color: colors.text },
   muted: { ...typography.small, color: colors.textMuted },
+  choices: { gap: spacing.sm },
   actions: { gap: spacing.sm, marginTop: spacing.md },
+});
+
+const languageStyles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.background, padding: spacing.lg },
+  header: { alignItems: 'center', gap: spacing.sm, marginTop: spacing.xl, marginBottom: spacing.xl },
+  eyebrow: {
+    ...typography.small,
+    fontFamily: fonts.bold,
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginTop: spacing.sm,
+  },
+  title: { ...typography.display, color: colors.text, textAlign: 'center' },
+  choices: { gap: spacing.sm },
+  spacer: { flex: 1 },
 });

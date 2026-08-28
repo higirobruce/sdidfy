@@ -12,7 +12,8 @@
  * release build cannot accidentally pick up a test double.
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { SafeAreaView, StatusBar, StyleSheet } from 'react-native';
+import { StatusBar, StyleSheet } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { ProtocolClient } from '../core/client.js';
 import type { PendingGroup } from '../core/pending.js';
 import { assertPinnedTransport, type HttpTransport } from '../core/transport.js';
@@ -73,13 +74,50 @@ export function createApp(options: CreateAppOptions): React.ReactElement {
 
   const initialLocale: Locale = resolveLocale(options.preferredLocales);
   return (
-    <AppProvider client={client} initialLocale={initialLocale}>
-      <Root
-        deviceLabel={options.deviceLabel}
-        appVersion={options.appVersion}
-        biometrics={biometrics}
-      />
-    </AppProvider>
+    <AppShell
+      client={client}
+      deviceLabel={options.deviceLabel}
+      appVersion={options.appVersion}
+      biometrics={biometrics}
+      initialLocale={initialLocale}
+    />
+  );
+}
+
+/** The one thing `Root` needs from `biometrics` beyond the core `BiometricPrompt`
+ * interface — kept this narrow so any composition root (real or preview) can
+ * satisfy it without depending on a concrete native class. */
+export interface ScreenCompromiseCheck {
+  isScreenCompromised(): Promise<boolean>;
+}
+
+export interface AppShellProps {
+  client: ProtocolClient;
+  deviceLabel: string;
+  appVersion: string;
+  biometrics: ScreenCompromiseCheck;
+  initialLocale: Locale;
+}
+
+/**
+ * The navigation shell, factored out of `createApp()` so a non-production
+ * composition root (a mock-backed preview, say) can reuse the exact same
+ * screen-switching logic instead of forking it — only which client/biometrics
+ * get constructed should ever differ.
+ */
+export function AppShell({
+  client,
+  deviceLabel,
+  appVersion,
+  biometrics,
+  initialLocale,
+}: AppShellProps): React.ReactElement {
+  return (
+    <SafeAreaProvider>
+      <AppProvider client={client} initialLocale={initialLocale}>
+        <Root deviceLabel={deviceLabel} appVersion={appVersion} biometrics={biometrics} />
+      </AppProvider>
+    </SafeAreaProvider>
   );
 }
 
@@ -90,7 +128,7 @@ function Root({
 }: {
   deviceLabel: string;
   appVersion: string;
-  biometrics: NativeBiometricPrompt;
+  biometrics: ScreenCompromiseCheck;
 }): React.ReactElement {
   const { client } = useApp();
   const [route, setRoute] = useState<Route>({ name: 'language' });

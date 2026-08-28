@@ -32,7 +32,7 @@ import type { PendingGroup } from '../../core/pending.js';
 import { isDecidable, secondsRemaining } from '../../core/pending.js';
 import { toMobileError, type MobileError } from '../../core/errors.js';
 import { describeScope } from '../../i18n/index.js';
-import { Button, Card, CodeChips, ErrorBanner, Screen } from '../components.js';
+import { BulletPoint, Button, Card, CodeChips, ErrorBanner, Screen } from '../components.js';
 import { useApp } from '../context.js';
 import { colors, radius, spacing, typography } from '../theme.js';
 
@@ -136,9 +136,7 @@ export function ApprovalScreen({
       <Card>
         <Text style={styles.label}>{t.t('approval.scopesTitle')}</Text>
         {txn.scopes.map((scope) => (
-          <Text key={scope} style={styles.scope}>
-            {`• ${describeScope(t, scope)}`}
-          </Text>
+          <BulletPoint key={scope} text={describeScope(t, scope)} />
         ))}
         <Text style={styles.meta}>
           {`${t.t('approval.assuranceLabel')}: ${txn.requestedAssurance}`}
@@ -216,7 +214,6 @@ const styles = StyleSheet.create({
   rpName: { ...typography.title, color: colors.text },
   codeCard: { alignItems: 'center' },
   instruction: { ...typography.body, color: colors.text },
-  scope: { ...typography.body, color: colors.text },
   meta: { ...typography.small, color: colors.textMuted },
   countdown: { ...typography.body, color: colors.textMuted, textAlign: 'center' },
   countdownExpired: { ...typography.body, color: colors.danger, textAlign: 'center' },

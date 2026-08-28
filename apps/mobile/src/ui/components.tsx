@@ -22,7 +22,7 @@ import {
 } from 'react-native';
 import type { MobileError } from '../core/errors.js';
 import { useT } from './context.js';
-import { colors, MIN_TOUCH_TARGET, radius, spacing, typography } from './theme.js';
+import { colors, fonts, MIN_TOUCH_TARGET, radius, spacing, typography } from './theme.js';
 
 export type ButtonVariant = 'primary' | 'danger' | 'secondary';
 
@@ -66,6 +66,7 @@ export function Button({
         style={[
           styles.buttonLabel,
           variant === 'secondary' ? styles.buttonLabelDark : styles.buttonLabelLight,
+          disabled && styles.buttonLabelDisabled,
         ]}
       >
         {label}
@@ -95,6 +96,58 @@ export function Screen({ title, children, scroll = true }: ScreenProps): React.R
     </ScrollView>
   ) : (
     <View style={[styles.screen, styles.screenContent]}>{body}</View>
+  );
+}
+
+export interface StepScreenProps {
+  title: string;
+  /** Omit both to render without a step indicator. */
+  steps?: number;
+  currentStep?: number;
+  children: React.ReactNode;
+  /**
+   * Rendered OUTSIDE the scroll area, pinned to the bottom of the viewport —
+   * the primary action stays in the same thumb-reachable place regardless of
+   * how much (or how little) content is above it, instead of just trailing
+   * after short content and leaving an ambiguous empty gap.
+   */
+  footer?: React.ReactNode;
+}
+
+export function StepScreen({
+  title,
+  steps,
+  currentStep,
+  children,
+  footer,
+}: StepScreenProps): React.ReactElement {
+  return (
+    <View style={styles.stepRoot}>
+      <ScrollView
+        style={styles.stepScroll}
+        contentContainerStyle={styles.stepScrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        {steps !== undefined && currentStep !== undefined ? (
+          <StepIndicator steps={steps} current={currentStep} />
+        ) : null}
+        <Text accessibilityRole="header" style={styles.stepTitle}>
+          {title}
+        </Text>
+        {children}
+      </ScrollView>
+      {footer ? <View style={styles.stepFooter}>{footer}</View> : null}
+    </View>
+  );
+}
+
+/** One line in a bulleted list — a dot, never a plain "• " text prefix. */
+export function BulletPoint({ text }: { text: string }): React.ReactElement {
+  return (
+    <View style={styles.bulletRow}>
+      <View style={styles.bulletDot} />
+      <Text style={styles.bulletText}>{text}</Text>
+    </View>
   );
 }
 
@@ -153,6 +206,46 @@ export function Row({
       <Text style={styles.rowLabel}>{label}</Text>
       <Text style={styles.rowValue}>{value}</Text>
     </View>
+  );
+}
+
+/**
+ * One option in a single-choice list (language, and anywhere else picking
+ * one of a few named options makes sense) — visually a card with a radio
+ * indicator, deliberately NOT the same pill shape `Button` uses. A selected
+ * option and a submit action are different kinds of thing; giving them the
+ * same weight is what made the language screen read as a list of buttons
+ * with no hierarchy.
+ */
+export function SelectableCard({
+  label,
+  selected,
+  onPress,
+  accessibilityHint,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  accessibilityHint?: string;
+}): React.ReactElement {
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      accessibilityLabel={label}
+      {...(accessibilityHint ? { accessibilityHint } : {})}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.choiceCard,
+        selected && styles.choiceCardSelected,
+        pressed && styles.buttonPressed,
+      ]}
+    >
+      <Text style={[styles.choiceLabel, selected && styles.choiceLabelSelected]}>{label}</Text>
+      <View style={[styles.choiceMark, selected && styles.choiceMarkSelected]}>
+        {selected ? <View style={styles.choiceMarkDot} /> : null}
+      </View>
+    </Pressable>
   );
 }
 
@@ -366,6 +459,24 @@ const styles = StyleSheet.create({
   screenContent: { padding: spacing.md, paddingBottom: spacing.xl },
   screenBody: { gap: spacing.md },
   screenTitle: { ...typography.title, color: colors.text },
+  bulletRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
+  bulletDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary, marginTop: 9 },
+  bulletText: { ...typography.body, color: colors.text, flex: 1 },
+  stepRoot: { flex: 1, backgroundColor: colors.background },
+  stepScroll: { flex: 1 },
+  stepScrollContent: {
+    padding: spacing.lg,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.lg,
+    gap: spacing.md,
+  },
+  stepTitle: { ...typography.title, color: colors.text },
+  stepFooter: {
+    padding: spacing.lg,
+    paddingTop: spacing.sm,
+    gap: spacing.sm,
+    backgroundColor: colors.background,
+  },
   button: {
     minHeight: MIN_TOUCH_TARGET,
     borderRadius: radius.pill,
@@ -374,14 +485,55 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
-  buttonPrimary: { backgroundColor: colors.primary },
+  buttonPrimary: {
+    backgroundColor: colors.primary,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 3,
+  },
   buttonDanger: { backgroundColor: colors.danger },
   buttonSecondary: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-  buttonDisabled: { opacity: 0.5 },
+  // Overrides variant colour + shadow entirely rather than dimming them —
+  // 50% opacity on a saturated fill reads as a rendering glitch, not a
+  // deliberate "not ready yet" state.
+  buttonDisabled: {
+    backgroundColor: colors.border,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
   buttonPressed: { opacity: 0.85 },
   buttonLabel: { ...typography.heading },
   buttonLabelLight: { color: colors.primaryText },
   buttonLabelDark: { color: colors.text },
+  buttonLabelDisabled: { color: colors.textMuted },
+  choiceCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: MIN_TOUCH_TARGET + 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  choiceCardSelected: { borderColor: colors.primary, backgroundColor: colors.primarySurface },
+  choiceLabel: { ...typography.heading, color: colors.text },
+  choiceLabelSelected: { color: colors.primary },
+  choiceMark: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  choiceMarkSelected: { borderColor: colors.primary },
+  choiceMarkDot: { width: 11, height: 11, borderRadius: 6, backgroundColor: colors.primary },
   errorBanner: {
     backgroundColor: colors.warningSurface,
     borderColor: colors.warning,
@@ -399,12 +551,15 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.md,
     gap: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
+    shadowColor: colors.text,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 2,
   },
   row: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.md },
   rowLabel: { ...typography.small, color: colors.textMuted, flexShrink: 1 },
-  rowValue: { ...typography.small, color: colors.text, fontWeight: '600', flexShrink: 1 },
+  rowValue: { ...typography.small, fontFamily: fonts.semiBold, color: colors.text, flexShrink: 1 },
 
   stepRow: { flexDirection: 'row', gap: spacing.xs },
   step: { flex: 1, height: 4, borderRadius: 3, backgroundColor: colors.border },
@@ -425,7 +580,7 @@ const styles = StyleSheet.create({
   },
   codeChipText: { ...typography.code, fontSize: 24, color: colors.code },
 
-  arcWrap: { alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
+  arcWrap: { alignItems: 'center', justifyContent: 'center', gap: spacing.sm, alignSelf: 'center' },
   arcFace: { width: '100%', aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
   arcTick: {
     position: 'absolute',
@@ -449,7 +604,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
   },
   pillMark: { width: 7, height: 7, borderRadius: 4 },
-  pillText: { ...typography.small, fontSize: 12, fontWeight: '700' as const },
+  pillText: { ...typography.small, fontFamily: fonts.bold, fontSize: 12 },
   pillPositive: { backgroundColor: colors.accentSurface },
   pillMarkPositive: { backgroundColor: colors.accent },
   pillTextPositive: { color: colors.success },
