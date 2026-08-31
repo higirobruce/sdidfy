@@ -45,8 +45,8 @@ importers:
         specifier: ^5.4.0
         version: 5.11.1
       jose:
-        specifier: ^4.15.9
-        version: 4.15.9
+        specifier: ^6.2.10
+        version: 6.2.10
       pg:
         specifier: ^8.13.0
         version: 8.23.0
@@ -132,8 +132,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       jose:
-        specifier: ^4.15.9
-        version: 4.15.9
+        specifier: ^6.2.10
+        version: 6.2.10
     devDependencies:
       '@types/node':
         specifier: ^22.10.0
@@ -1209,8 +1209,8 @@ packages:
     resolution: {integrity: sha512-RKYVTCjAnRthyJes037NX/IiqeidgN1xc3j1RjFfECFp28A1GVwK9nA+i0rJPaHqSZwygLzRnFlzUuHFoWWy+Q==}
     engines: {node: '>=6'}
 
-  jose@4.15.9:
-    resolution: {integrity: sha512-1vUQX+IdDMVPj4k8kOxgUqlcK518yluMuGZwqlr44FS1ppZB/5GWh4rZG89erpOBOJjU/OBsnCVFfapsRz6nEA==}
+  jose@6.2.10:
+    resolution: {integrity: sha512-iiW7J9qRFlGxvCOIBDBDxFePQSn7ZMAnrYGhrrOo6siO/MIqwfyilLR27pkfDgUk+raLuzADS8A3S/KLBisc0g==}
 
   js-tokens@9.0.1:
     resolution: {integrity: sha512-mxa9E9ITFOt0ban3j6L5MpjwegGz6lBQmM1IJkWeBZGcMxto50+eWdjC/52xDbS2vy0k7vIMK0Fe2wfL9OQSpQ==}
@@ -2470,7 +2470,7 @@ snapshots:
 
   iterare@1.2.1: {}
 
-  jose@4.15.9: {}
+  jose@6.2.10: {}
 
   js-tokens@9.0.1: {}
 
