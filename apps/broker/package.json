@@ -19,10 +19,10 @@
     "@sdid/match-engine": "workspace:*",
     "@sdid/sdid-adapter": "workspace:*",
     "@sdid/shared": "workspace:*",
-    "drizzle-orm": "^0.44.0",
+    "drizzle-orm": "^0.45.3",
     "ioredis": "^5.4.0",
     "jose": "^4.15.9",
-    "pg": "^8.13.0",
+    "pg": "^8.23.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "zod": "^3.24.1"
